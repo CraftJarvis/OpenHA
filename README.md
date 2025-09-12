@@ -1,5 +1,4 @@
 # OpenHA
-Repo for Paper "OpenHA: A Series of Open-Source Hierarchical Vision-Language-Action Models"
 
 ## News
 * [2025.9.12] We release the OpenHA base model.
