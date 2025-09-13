@@ -27,7 +27,7 @@
 Clone repo and install dependencies:
 
 ```sh
-git clone https://github.com/CraftJarvis/OpenHA.git
+git clone --recurse-submodules https://github.com/CraftJarvis/OpenHA.git
 conda create -n openha python=3.10
 conda activate openha
 pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124  # check your CUDA version
@@ -121,11 +121,11 @@ MODE_SYSTEM_PROMPT_MAP = {
 
 | Action Space     | Size        | HuggingFace URL                                                                 |
 |------------------|-------------|---------------------------------------------------------------------------------|
-| Motion Action    | 1B Tokens   | https://huggingface.co/CraftJarvis/minecraft-motion-action-dataset                 |
-| Grounding Action | 1B Tokens   | https://huggingface.co/CraftJarvis/minecraft-grounding-action-dataset              |
-| Text Action      | 2B Tokens   | https://huggingface.co/CraftJarvis/minecraft-text-action-dataset                   |
-| Motion CoA       | 0.5B Tokens | https://huggingface.co/CraftJarvis/minecraft-motion-coa-dataset                    |
-| Grounding CoA    | 0.5B Tokens | https://huggingface.co/CraftJarvis/minecraft-grounding-coa-dataset                 |
+| Motion Action    | 1B Tokens   | https://huggingface.co/datasets/CraftJarvis/minecraft-motion-action-dataset                 |
+| Grounding Action | 1B Tokens   | https://huggingface.co/datasets/CraftJarvis/minecraft-grounding-action-dataset              |
+| Text Action      | 2B Tokens   | https://huggingface.co/datasets/CraftJarvis/minecraft-text-action-dataset                   |
+| Motion CoA       | 0.5B Tokens | https://huggingface.co/datasets/CraftJarvis/minecraft-motion-coa-dataset                    |
+| Grounding CoA    | 0.5B Tokens | https://huggingface.co/datasets/CraftJarvis/minecraft-grounding-coa-dataset                 |
 
 ---
 
