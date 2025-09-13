@@ -12,7 +12,7 @@
     <a href="https://github.com/CraftJarvis/OpenHA"><img src="https://img.shields.io/github/stars/CraftJarvis/OpenHA"/></a>
 </div>
 
-![framework](./assets/doc/framework.pdf)
+![framework](./openagents/assets/doc/framework.pdf)
 
 ---
 
