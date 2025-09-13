@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=42", "wheel", "setuptools-scm[toml]>=6.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openagents"
+version="1.0.0"
+description = "A simple and efficient package for general Minecraft agents."
+dependencies = [
+    "setuptools",
+    "tqdm",
+    "rich",
+    "openai",
+    "anthropic",
+    "vllm==0.8.5",
+    "pandas",
+    "numpy==1.26.4",
+    "av",
+    "imageio",
+    "transformers==4.54.0",
+    "minestudio",
+    "einops",
+    "torch",
+    "torchvision",
+    "opencv-python",
+    "Pillow",
+    "ray",
+    "minecraft_data",
+    "nvitop",
+]
+authors = [
+    {name="CraftJarvis", email="craftjarvis@outlook.com"}
+]
+requires-python = ">=3.10"
+
+[tool.setuptools]
+packages = ["openagents"]
+include-package-data = true
+
+[tool.setuptools-scm]
+version_scheme = "post-release"
+local_scheme = "node-and-timestamp"
+include = ".gitignore"
+
+
+[tool.setuptools.dynamic]
+readme = {file = "README.md"}
+
+[tool.pytest.ini_options]
+addopts = [
+    "--import-mode=importlib",
+]
