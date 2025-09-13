@@ -87,11 +87,11 @@ You can control the **output format** of OpenHA via `system_message_tag` in `rol
 
 | Parameter          | Output Example                                                                                                       | System Prompt                                                                 |
 |--------------------|-----------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------|
-| `text_action`      | `Action: move(dx='4.0', dy='-1.0') and keyDown(keys=(keyboard.left.control, keyboard.w))`                            | [text_action.txt](./assets/system_prompt/text_action.txt)                      |
-| `grounding_action` | `Grounding: move_camera <\|object_ref_start\|>empty slot<\|object_ref_end\|><\|point_start\|>(881,558)<\|point_end\|>` | [grounding.txt](./assets/system_prompt/grounding.txt)                          |
-| `motion_action`    | `Motion: cursor move left and down`                                                                                  | [motion.txt](./assets/system_prompt/motion.txt)                                |
-| `grounding_coa`    | `Grounding: ... (615,505)... \n, Action: move(19, 0) and press()`                                                    | [grounding_coa.txt](./assets/system_prompt/grounding_coa.txt)                  |
-| `motion_coa`       | `Motion: cursor move right and up \n, Action: move(17, 0) and press()`                                               | [motion_coa.txt](./assets/system_prompt/motion_coa.txt)                        |
+| `text_action`      | `Action: move(dx='4.0', dy='-1.0') and keyDown(keys=(keyboard.left.control, keyboard.w))`                            | [text_action.txt](./openagents/assets/system_prompt/text_action.txt)                      |
+| `grounding_action` | `Grounding: move_camera <\|object_ref_start\|>empty slot<\|object_ref_end\|><\|point_start\|>(881,558)<\|point_end\|>` | [grounding.txt](./openagents/assets/system_prompt/grounding.txt)                          |
+| `motion_action`    | `Motion: cursor move left and down`                                                                                  | [motion.txt](./openagents/assets/system_prompt/motion.txt)                                |
+| `grounding_coa`    | `Grounding: ... (615,505)... \n, Action: move(19, 0) and press()`                                                    | [grounding_coa.txt](./openagents/assets/system_prompt/grounding_coa.txt)                  |
+| `motion_coa`       | `Motion: cursor move right and up \n, Action: move(17, 0) and press()`                                               | [motion_coa.txt](./openagents/assets/system_prompt/motion_coa.txt)                        |
 
 Corresponding `output_mode` values:  
 
@@ -121,11 +121,11 @@ MODE_SYSTEM_PROMPT_MAP = {
 
 | Action Space     | Size        | HuggingFace URL                                                                 |
 |------------------|-------------|---------------------------------------------------------------------------------|
-| Motion Action    | 1B Tokens   | https://huggingface.co/zhwang4ai/minecraft-motion-action-dataset                 |
-| Grounding Action | 1B Tokens   | https://huggingface.co/zhwang4ai/minecraft-grounding-action-dataset              |
-| Text Action      | 2B Tokens   | https://huggingface.co/zhwang4ai/minecraft-text-action-dataset                   |
-| Motion CoA       | 0.5B Tokens | https://huggingface.co/zhwang4ai/minecraft-motion-coa-dataset                    |
-| Grounding CoA    | 0.5B Tokens | https://huggingface.co/zhwang4ai/minecraft-grounding-coa-dataset                 |
+| Motion Action    | 1B Tokens   | https://huggingface.co/CraftJarvis/minecraft-motion-action-dataset                 |
+| Grounding Action | 1B Tokens   | https://huggingface.co/CraftJarvis/minecraft-grounding-action-dataset              |
+| Text Action      | 2B Tokens   | https://huggingface.co/CraftJarvis/minecraft-text-action-dataset                   |
+| Motion CoA       | 0.5B Tokens | https://huggingface.co/CraftJarvis/minecraft-motion-coa-dataset                    |
+| Grounding CoA    | 0.5B Tokens | https://huggingface.co/CraftJarvis/minecraft-grounding-coa-dataset                 |
 
 ---
 
