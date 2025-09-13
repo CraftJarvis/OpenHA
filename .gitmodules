@@ -1,0 +1,3 @@
+[submodule "sam2"]
+    path = external/SAM2
+    url = https://github.com/zhwang4ai/SAM2.git
