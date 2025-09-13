@@ -1,30 +1,146 @@
-# OpenHA
+# <center> OpenHA: A Series of Open-Source Hierarchical Vision-Language-Action Models</center>
 
-## News
-* [2025.9.12] We release the OpenHA base model.
+<div align="center">
+    <a href="https://craftjarvis.github.io/"><img alt="Homepage" src="https://img.shields.io/badge/%20CraftJarvis-HomePage-ffc107?color=blue&logoColor=white"/></a>
+    <a href="https://huggingface.co/CraftJarvis"><img alt="Hugging Face" src="https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-CraftJarvis-ffc107?color=3b65ab&logoColor=white"/></a>
+    <a href="https://github.com/CraftJarvis/OpenHA/blob/master/LICENSE"><img src="https://img.shields.io/badge/Code License-MIT-blue"/></a>
+</div>
 
-## Open-source Models and Datasets
+<div align="center">	
+    <a href="https://huggingface.co/CraftJarvis"><img src="https://img.shields.io/badge/Dataset-Released-orange"/></a>
+    <a href="https://github.com/CraftJarvis/OpenHA"><img src="https://visitor-badge.laobi.icu/badge?page_id=CraftJarvis.OpenHA"/></a>
+    <a href="https://github.com/CraftJarvis/OpenHA"><img src="https://img.shields.io/github/stars/CraftJarvis/OpenHA"/></a>
+</div>
 
-### Open-source Models
+![framework](./assets/doc/framework.pdf)
 
-| Model Name                          | Params | Huggingface URL                                                                 |
-|-------------------------------------|--------|---------------------------------------------------------------------------------|
-| Minecraft-MotionHA-Qwen2VL-2509     | 7B     | [https://huggingface.co/zhwang4ai/minecraft-motionha-qwen2vl-7b-2509](https://huggingface.co/zhwang4ai/minecraft-motionha-qwen2vl-7b-2509) |
-| Minecraft-PointHA-Qwen2VL-2509      | 7B     | [https://huggingface.co/zhwang4ai/minecraft-pointha-qwen2vl-7b-2509](https://huggingface.co/zhwang4ai/minecraft-pointha-qwen2vl-7b-2509)   |
-| Minecraft-TextVLA-Qwen2VL-2509      | 7B     | [https://huggingface.co/zhwang4ai/minecraft-textvla-qwen2vl-7b-2509](https://huggingface.co/zhwang4ai/minecraft-textvla-qwen2vl-7b-2509)   |
-| Minecraft-OpenHA-Qwen2VL-2509-Base  | 7B     | [https://huggingface.co/zhwang4ai/minecraft-openha-qwen2vl-7b-2509](https://huggingface.co/zhwang4ai/minecraft-openha-qwen2vl-7b-2509)     |
+---
+
+## ⭐️ Updates
+- **[09/13/2025] — Released OpenHA inference code!**
+
+---
+
+## 🎈 Getting Started
+
+### 🔧 Installation
+Clone repo and install dependencies:
+
+```sh
+git clone https://github.com/CraftJarvis/OpenHA.git
+conda create -n openha python=3.10
+conda activate openha
+pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124  # check your CUDA version
+cd OpenHA
+conda install --channel=conda-forge openjdk=8 -y
+pip install -e .
+```
+
+> ⚠️ Note: The script will install **minestudio** automatically. If you have not used MineStudio before, please check [the tutorial](https://craftjarvis.github.io/MineStudio/overview/getting-started.html).
+
+For grounding-HA integration with [ROCKET-1](), you need a slightly modified **SAM2**:
+```sh
+cd external/SAM2
+pip install -e .
+```
+
+---
+
+### 🚀 Inference
+OpenHA supports multiple ways to serve and load models.  
+We recommend **vLLM** for efficient multi-GPU / multi-process rollout. Example:
+
+```sh
+CUDA_VISIBLE_DEVICES=0,1,2,3 vllm serve CraftJarvis/minecraft-openha-qwen2vl-7b-2509  \
+    --served-model-name minecraft-openha-qwen2vl-7b-2509  \
+    --port 11000 \
+    --limit-mm-per-prompt image=25  \
+    --trust-remote-code --gpu-memory-utilization 0.90  \
+    --pipeline-parallel-size 1  \
+    --tensor-parallel-size 4  \
+    --max-num-seqs 16 \
+    --max-logprobs 20 \
+    --max-model-len 32768
+```
+
+Once the model is loaded, run rollout:
+
+```sh
+python examples/rollout_openha.py --output_mode text_action  \
+    --vlm_client_mode online \
+    --system_message_tag text_action \
+    --model_ips localhost --model_ports 11000 \
+    --model_id minecraft-openha-qwen2vl-7b-2509 \
+    --record_path "/DATA/limuyao/evaluate" \
+    --max_steps_num 200 \
+    --num_rollouts 8
+```
+
+OpenHA also supports HuggingFace Transformers (`hf`) or offline `vllm` loading.  
+Just change the `--vlm_client_mode` argument accordingly.
+
+---
+
+## 🎮 Interaction Details
+
+You can control the **output format** of OpenHA via `system_message_tag` in `rollout_openha.py`.
+
+| Parameter          | Output Example                                                                                                       | System Prompt                                                                 |
+|--------------------|-----------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------|
+| `text_action`      | `Action: move(dx='4.0', dy='-1.0') and keyDown(keys=(keyboard.left.control, keyboard.w))`                            | [text_action.txt](./assets/system_prompt/text_action.txt)                      |
+| `grounding_action` | `Grounding: move_camera <\|object_ref_start\|>empty slot<\|object_ref_end\|><\|point_start\|>(881,558)<\|point_end\|>` | [grounding.txt](./assets/system_prompt/grounding.txt)                          |
+| `motion_action`    | `Motion: cursor move left and down`                                                                                  | [motion.txt](./assets/system_prompt/motion.txt)                                |
+| `grounding_coa`    | `Grounding: ... (615,505)... \n, Action: move(19, 0) and press()`                                                    | [grounding_coa.txt](./assets/system_prompt/grounding_coa.txt)                  |
+| `motion_coa`       | `Motion: cursor move right and up \n, Action: move(17, 0) and press()`                                               | [motion_coa.txt](./assets/system_prompt/motion_coa.txt)                        |
+
+Corresponding `output_mode` values:  
+
+```python
+MODE_SYSTEM_PROMPT_MAP = {
+    "greedy": {"motion_coa", "grounding_coa"},
+    "text_action": {"text_action"},
+    "grounding": {"grounding_action"},
+    "motion": {"motion_action"},
+}
+```
+
+---
+
+## 📦 Models on 🤗 Hugging Face
+
+| Model Name                           | Size | HuggingFace URL                                                                                     | Training Framework                                   |
+|--------------------------------------|------|-----------------------------------------------------------------------------------------------------|------------------------------------------------------|
+| Minecraft-MotionHA-Qwen2VL-2509      | 7B   | https://huggingface.co/CraftJarvis/minecraft-motionha-qwen2vl-7b-2509                               | [TRL](https://github.com/huggingface/trl)            |
+| Minecraft-PointHA-Qwen2VL-2509       | 7B   | https://huggingface.co/CraftJarvis/minecraft-pointha-qwen2vl-7b-2509                                | [TRL](https://github.com/huggingface/trl)            |
+| Minecraft-TextVLA-Qwen2VL-2509       | 7B   | https://huggingface.co/CraftJarvis/minecraft-textvla-qwen2vl-7b-2509                                | [VeOmni](https://github.com/ByteDance-Seed/VeOmni)   |
+| Minecraft-OpenHA-Qwen2VL-2509-Base   | 7B   | https://huggingface.co/CraftJarvis/minecraft-openha-qwen2vl-7b-2509                                 | [VeOmni](https://github.com/ByteDance-Seed/VeOmni)   |
+
+---
+
+## 📊 Datasets on 🤗 Hugging Face
+
+| Action Space     | Size        | HuggingFace URL                                                                 |
+|------------------|-------------|---------------------------------------------------------------------------------|
+| Motion Action    | 1B Tokens   | https://huggingface.co/zhwang4ai/minecraft-motion-action-dataset                 |
+| Grounding Action | 1B Tokens   | https://huggingface.co/zhwang4ai/minecraft-grounding-action-dataset              |
+| Text Action      | 2B Tokens   | https://huggingface.co/zhwang4ai/minecraft-text-action-dataset                   |
+| Motion CoA       | 0.5B Tokens | https://huggingface.co/zhwang4ai/minecraft-motion-coa-dataset                    |
+| Grounding CoA    | 0.5B Tokens | https://huggingface.co/zhwang4ai/minecraft-grounding-coa-dataset                 |
+
+---
+
+## 😊 Acknowledgement
+We thank the following projects for their excellent work:  
+- [minerl](https://github.com/minerllabs/minerl)  
+- [malmo](https://github.com/microsoft/malmo)  
+- [MineStudio](https://github.com/CraftJarvis/MineStudio/tree/master)  
+- [ROCKET-1](https://github.com/CraftJarvis/ROCKET-1)  
+- [SAM2](https://github.com/facebookresearch/sam2)  
 
 
-### Open-source Datasets
+---
 
-| Action Space     | Dataset Size | Huggingface URL                                                                 |
-|------------------|--------------|---------------------------------------------------------------------------------|
-| Motion Action    | 1B Tokens    | [https://huggingface.co/zhwang4ai/minecraft-motion-action-dataset](https://huggingface.co/zhwang4ai/minecraft-motion-action-dataset)       |
-| Grounding Action | 1B Tokens    | [https://huggingface.co/zhwang4ai/minecraft-grounding-action-dataset](https://huggingface.co/zhwang4ai/minecraft-grounding-action-dataset) |
-| Text Action      | 2B Tokens    | [https://huggingface.co/zhwang4ai/minecraft-text-action-dataset](https://huggingface.co/zhwang4ai/minecraft-text-action-dataset)           |
-| Motion CoA       | 0.5B Tokens  | [https://huggingface.co/zhwang4ai/minecraft-motion-coa-dataset](https://huggingface.co/zhwang4ai/minecraft-motion-coa-dataset)             |
-| Grounding CoA    | 0.5B Tokens  | [https://huggingface.co/zhwang4ai/minecraft-grounding-coa-dataset](https://huggingface.co/zhwang4ai/minecraft-grounding-coa-dataset)       |
-
-## Bibtex
+## 📝 Citation
+If you find **OpenHA** useful, please give us a ⭐ on GitHub or cite us:
 
 
