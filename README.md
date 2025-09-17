@@ -1,4 +1,4 @@
-# <center> OpenHA: A Series of Open-Source Hierarchical Vision-Language-Action Models</center>
+# <center> OpenHA: A Series of Open-Source Hierarchical Agentic Models in Minecraft</center>
 
 <div align="center">
     <a href="https://craftjarvis.github.io/"><img alt="Homepage" src="https://img.shields.io/badge/%20CraftJarvis-HomePage-ffc107?color=blue&logoColor=white"/></a>
