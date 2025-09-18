@@ -118,19 +118,7 @@ MODE_SYSTEM_PROMPT_MAP = {
 | Minecraft-TextVLA-Qwen2VL-2509       | 7B   | https://huggingface.co/CraftJarvis/minecraft-textvla-qwen2vl-7b-2509                                | [VeOmni](https://github.com/ByteDance-Seed/VeOmni)   |
 | Minecraft-OpenHA-Qwen2VL-2509-Base   | 7B   | https://huggingface.co/CraftJarvis/minecraft-openha-qwen2vl-7b-2509                                 | [VeOmni](https://github.com/ByteDance-Seed/VeOmni)   |
 
----
 
-## 📊 Datasets on 🤗 Hugging Face
-
-| Action Space     | Size        | HuggingFace URL                                                                 |
-|------------------|-------------|---------------------------------------------------------------------------------|
-| Motion Action    | 1B Tokens   | https://huggingface.co/datasets/CraftJarvis/minecraft-motion-action-dataset                 |
-| Grounding Action | 1B Tokens   | https://huggingface.co/datasets/CraftJarvis/minecraft-grounding-action-dataset              |
-| Text Action      | 2B Tokens   | https://huggingface.co/datasets/CraftJarvis/minecraft-text-action-dataset                   |
-| Motion CoA       | 0.5B Tokens | https://huggingface.co/datasets/CraftJarvis/minecraft-motion-coa-dataset                    |
-| Grounding CoA    | 0.5B Tokens | https://huggingface.co/datasets/CraftJarvis/minecraft-grounding-coa-dataset                 |
-
----
 
 ## 😊 Acknowledgement
 We thank the following projects for their excellent work:  
