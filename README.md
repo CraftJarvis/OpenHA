@@ -7,7 +7,9 @@
 </div>
 
 <div align="center">	
-    <a href="https://huggingface.co/CraftJarvis"><img src="https://img.shields.io/badge/Dataset-Released-orange"/></a>
+    <a href="https://arxiv.org/abs/2509.13347"><img src="https://img.shields.io/badge/arXiv-2509.13347-b31b1b.svg"></a>
+    <a href="https://huggingface.co/collections/CraftJarvis/openha-68c5248493fc6672b3ccaa29"><img src="https://img.shields.io/badge/Model-Released-green"/></a>
+    <a href="https://huggingface.co/collections/CraftJarvis/openha-68c5248493fc6672b3ccaa29"><img src="https://img.shields.io/badge/Dataset-Released-orange"/></a>
     <a href="https://github.com/CraftJarvis/OpenHA"><img src="https://visitor-badge.laobi.icu/badge?page_id=CraftJarvis.OpenHA"/></a>
     <a href="https://github.com/CraftJarvis/OpenHA"><img src="https://img.shields.io/github/stars/CraftJarvis/OpenHA"/></a>
 </div>
@@ -17,7 +19,8 @@
 ---
 
 ## ⭐️ Updates
-- **[09/13/2025] — Released OpenHA inference code!**
+- **[2025.09] Released our paper: "[OpenHA: A Series of Open-Source Hierarchical Agentic Models in Minecraft](https://arxiv.org/abs/2509.13347)".**
+- **[2025.09] Released the codebase.**
 
 ---
 
@@ -143,4 +146,12 @@ We thank the following projects for their excellent work:
 ## 📝 Citation
 If you find **OpenHA** useful, please give us a ⭐ on GitHub or cite us:
 
-
+```bibtex
+@article{wang2025openha,
+      title={OpenHA: A Series of Open-Source Hierarchical Agentic Models in Minecraft}, 
+      author={Zihao Wang and Muyao Li and Kaichen He and Xiangyu Wang and Zhancun Mu and Anji Liu and Yitao Liang},
+      journal = {arXiv preprint arXiv:2509.13347},
+      year={2025},
+      url={https://arxiv.org/abs/2509.13347}, 
+}
+```
