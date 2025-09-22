@@ -1315,7 +1315,7 @@
         }
       ],
       "tool": [
-        "wooden_shovel:{Enchantments:[{id:silk_touch, lvl:1}]}",
+        "wooden_shovel",
         ""
       ]
     },
