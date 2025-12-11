@@ -10,10 +10,10 @@ set -x
 epoch=1
 card_type="A800"
 max_seq_length=19456 #12288
-dataset_paths="OpenHA/rl/datasets/sft/msrl_coldstart/20250909/mc-mix-coa-qwen2-vl-7b-250906_120-withsystem-onlyraw.jsonl" #"/DATA/lmy/datasets/mc-mix_vla-0827-train.jsonl" 
+dataset_paths="OpenHA/rl/datasets/sft/ssrl_coldstart/20250906/mc-mix-coa-ssrl_base-qwen2-vl-7b-250830-withsystem.jsonl" #"/DATA/lmy/datasets/mc-mix_vla-0827-train.jsonl" 
 real_dataset_len=4000 # 900000/2
-base_model_path="/share_data/limuyao/checkpoints/train/mc-openha-state2-qwen2-vl-7b-250830-A800-e1-b4-a1/checkpoints/global_step_300/hf_ckpt/" 
-version="mc-mix_coa-msrl_coldstart-qwen2-vl-7b-250911" #stage2
+base_model_path="CraftJarvis/minecraft-openha-qwen2vl-7b-2509"
+version="mc-mix_coa-rl_stage1-qwen2-vl-7b-250906" #"mc-mix_vla-qwen2-vl-7b-250828"
 
 cuda_visible_devices="0,1,2,3,4,5,6,7"
 card_number=8          # 每机GPU数 = 每机进程数
@@ -115,7 +115,7 @@ torchrun --nnodes="$NNODES" --nproc-per-node "$NPROC_PER_NODE" --node-rank "$NOD
   --train.weight_decay 0.05 \
   --train.lr_decay_style cosine \
   --train.save_steps 100 \
-  --train.output_dir "/share/hkc/checkpoints/msrl_coldstart/$WANDB_NAME" \
+  --train.output_dir "/share/hkc/checkpoints/ssrl/$WANDB_NAME" \
   --train.data_parallel_mode fsdp2 \
   --train.wandb_project "$WANDB_PROJECT" \
   --train.wandb_name "$WANDB_NAME" \

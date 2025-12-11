@@ -12,7 +12,7 @@ card_type="A800"
 max_seq_length=19456 #12288
 dataset_paths="OpenHA/rl/datasets/sft/msrl_coldstart/20250923/mc-msrl_coldstart-grounding_250923-train-withsystem.jsonl" #"/DATA/lmy/datasets/mc-mix_vla-0827-train.jsonl" 
 real_dataset_len=4000 # 900000/2
-base_model_path="/share_data/craftjarvis/models/mc-openha-stage2-qwen2-vl-7b-2509" 
+base_model_path="CraftJarvis/minecraft-openha-qwen2vl-7b-2509" 
 version="mc-openha-state2-qwen2-vl-7b-grounding_250929" #stage2
 
 cuda_visible_devices="0,1,2,3,4,5,6,7"
