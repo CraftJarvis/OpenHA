@@ -1,0 +1,78 @@
+{
+    "mc-mix-coa-qwen2-vl-7b-250816_400-greedy": {
+        "mine": {
+            "action_num": {
+                "motion": 7752,
+                "grounding": 2042,
+                "raw": 17891
+            },
+            "action_prop": {
+                "motion": 0.28000722412858947,
+                "raw": 0.6462344229727289,
+                "grounding": 0.0737583528986816
+            }
+        },
+        "kill": {
+            "action_num": {
+                "motion": 11297,
+                "grounding": 2736,
+                "raw": 23183
+            },
+            "action_prop": {
+                "motion": 0.3035522355975924,
+                "raw": 0.6229309974204643,
+                "grounding": 0.07351676698194325
+            }
+        },
+        "craft": {
+            "action_num": {
+                "motion": 12689,
+                "grounding": 2543,
+                "raw": 23753
+            },
+            "action_prop": {
+                "motion": 0.32548416057457996,
+                "raw": 0.609285622675388,
+                "grounding": 0.06523021675003206
+            }
+        }
+    },
+    "mc-mix-01reward-coa-qwen2-vl-7b-250825_20-greedy": {
+        "mine": {
+            "action_num": {
+                "motion": 8689,
+                "grounding": 1378,
+                "raw": 46695
+            },
+            "action_prop": {
+                "motion": 0.15307776329234346,
+                "raw": 0.8226454318029668,
+                "grounding": 0.024276804904689756
+            }
+        },
+        "kill": {
+            "action_num": {
+                "motion": 12125,
+                "grounding": 2148,
+                "raw": 57525
+            },
+            "action_prop": {
+                "motion": 0.16887657037800496,
+                "raw": 0.8012061617315246,
+                "grounding": 0.029917267890470486
+            }
+        },
+        "craft": {
+            "action_num": {
+                "motion": 15596,
+                "grounding": 1524,
+                "raw": 45654
+            },
+            "action_prop": {
+                "motion": 0.24844680918851753,
+                "raw": 0.727275623665849,
+                "grounding": 0.024277567145633543
+            }
+        }
+    }
+}
