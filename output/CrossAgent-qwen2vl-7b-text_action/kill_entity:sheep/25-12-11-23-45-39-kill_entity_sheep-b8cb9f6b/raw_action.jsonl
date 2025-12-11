@@ -1,4 +1,0 @@
-{"raw_action": ""}
-{"points": [[320, 180]], "raw_action": "Grounding: Approach <|object_ref_start|>sheep<|object_ref_end|><|point_start|>(538,475)<|point_end|> \nAction: move(0, 0) and press()", "action_type": "raw_action"}
-{"points": [[320, 180]], "raw_action": "Grounding: Approach <|object_ref_start|>sheep<|object_ref_end|><|point_start|>(539,475)<|point_end|> \nAction: move(0, 0) and press()", "action_type": "raw_action"}
-{"points": [[320, 180]], "raw_action": "Grounding: Approach <|object_ref_start|>sheep<|object_ref_end|><|point_start|>(538,475)<|point_end|> \nAction: move(0, 0) and press()", "action_type": "raw_action"}
