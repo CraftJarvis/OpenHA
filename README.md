@@ -19,6 +19,7 @@
 ---
 
 ## ⭐️ Updates
+- **[2025.12] Released our paper: "[Training One Model to Master Cross-Level Agentic Actions via Reinforcement Learning](https://arxiv.org/abs/2512.09706)".**
 - **[2025.09] Released our paper: "[OpenHA: A Series of Open-Source Hierarchical Agentic Models in Minecraft](https://arxiv.org/abs/2509.13347)".**
 - **[2025.09] Released the codebase.**
 
