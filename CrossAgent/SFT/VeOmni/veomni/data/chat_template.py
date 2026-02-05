@@ -18,9 +18,7 @@ from typing import TYPE_CHECKING, Dict, List, Sequence
 
 import torch
 
-from veomni.utils import logging
-
-from ..utils.registry import Registry
+from ..utils import logging
 from .constants import IGNORE_INDEX
 
 
@@ -31,11 +29,6 @@ if TYPE_CHECKING:
 logger = logging.get_logger(__name__)
 
 ROLE_SUPPORTED = ["system", "user", "assistant", "tool"]
-CHAT_TEMPLATE_REGISTRY = Registry("ChatTemplate")
-
-
-def build_chat_template(template_name: str, tokenizer: "PreTrainedTokenizer") -> "ChatTemplate":
-    return CHAT_TEMPLATE_REGISTRY[template_name](tokenizer)
 
 
 class ChatTemplate(ABC):
@@ -68,7 +61,6 @@ class ChatTemplate(ABC):
         ...
 
 
-@CHAT_TEMPLATE_REGISTRY.register("default")
 class DefaultTemplate(ChatTemplate):
     def encode_messages(self, messages: Sequence[Dict[str, str]], max_seq_len: int = 8192) -> Dict[str, List[int]]:
         input_ids, attention_mask, labels = [], [], []
@@ -96,7 +88,6 @@ class DefaultTemplate(ChatTemplate):
         )
 
 
-@CHAT_TEMPLATE_REGISTRY.register("llama2")
 class Llama2Template(ChatTemplate):
     def encode_messages(self, messages: Sequence[Dict[str, str]], max_seq_len: int = 8192) -> Dict[str, List[int]]:
         input_ids, attention_mask, labels = [], [], []
@@ -147,7 +138,6 @@ class Llama2Template(ChatTemplate):
         )
 
 
-@CHAT_TEMPLATE_REGISTRY.register("Janus")
 class JanusTemplate(ChatTemplate):
     def encode_messages(
         self, messages: Sequence[Dict[str, str]], max_seq_len: int = 8192, task_type: str = ""
@@ -230,7 +220,6 @@ class JanusTemplate(ChatTemplate):
         )
 
 
-@CHAT_TEMPLATE_REGISTRY.register("chatml")
 class ChatmlTemplate(ChatTemplate):
     def encode_messages(self, messages: Sequence[Dict[str, str]], max_seq_len: int = 8192) -> Dict[str, List[int]]:
         input_ids, attention_mask, labels = [], [], []
@@ -256,3 +245,18 @@ class ChatmlTemplate(ChatTemplate):
             "{% endfor %}"
             "{% if add_generation_prompt %}{{ '<|im_start|>assistant\n' }}{% endif %}"
         )
+
+
+TEMPLATES = {
+    "default": DefaultTemplate,
+    "llama2": Llama2Template,
+    "chatml": ChatmlTemplate,
+    "Janus": JanusTemplate,
+}
+
+
+def build_chat_template(template_name: str, tokenizer: "PreTrainedTokenizer") -> "ChatTemplate":
+    if template_name not in TEMPLATES:
+        raise ValueError(f"Unknown chat template: {template_name}")
+
+    return TEMPLATES[template_name](tokenizer)

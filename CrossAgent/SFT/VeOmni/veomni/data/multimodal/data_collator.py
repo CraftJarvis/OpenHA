@@ -27,13 +27,10 @@ from ..constants import IGNORE_INDEX
 from ..data_collator import DataCollator, pos2culen
 
 
-MODALITY = ["image", "video", "audio"]
-
-
 @dataclass
 class OmniSequenceShardCollator(DataCollator):
     """
-    Data collator to chunk inputs along the sequence length.
+    Data collator to chunk inputs according to sequence parallelism.
     """
 
     rmpad_with_pos_ids: bool = False
@@ -206,8 +203,6 @@ class OmniDataCollatorWithPadding(DataCollator):
                 batch[key] = pad_sequence(pad_list, batch_first=True, padding_value=pad_value)
                 if key == "position_ids" and len(batch[key][0].shape) == 2:
                     batch[key] = batch[key].transpose(1, 2)  # (bs, length, dim) -> (bs, dim, length)
-            elif key.split("_")[0] in MODALITY:
-                batch[key] = torch.cat(batch[key], dim=0)
             else:
                 batch[key] = default_collate(batch[key])
 
@@ -274,10 +269,6 @@ class OmniDataCollatorWithPacking(DataCollator):
                     [feature[input_name] for feature in features if input_name in feature], dim=-1
                 ).unsqueeze(0)
             elif input_name in self.concat_features:
-                batch[input_name] = torch.cat(
-                    [feature[input_name] for feature in features if input_name in feature], dim=0
-                )
-            elif input_name.split("_")[0] in MODALITY:
                 batch[input_name] = torch.cat(
                     [feature[input_name] for feature in features if input_name in feature], dim=0
                 )

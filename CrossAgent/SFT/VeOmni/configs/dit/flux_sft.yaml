@@ -13,7 +13,6 @@ data:
   train_path: X2I-text-to-image
   train_size: 1000000000000
   dataloader_type: native
-  datasets_type: iterable
   data_type: diffusion
   max_seq_len: 8192
   text_keys: text
@@ -49,7 +48,7 @@ train:
   init_device: cuda
   enable_full_determinism: false
   empty_cache_steps: 500
-  ckpt_manager: dcp
+  ckpt_manager: bytecheckpoint
   load_checkpoint_path: ""
   save_steps: 100
   max_steps: 500

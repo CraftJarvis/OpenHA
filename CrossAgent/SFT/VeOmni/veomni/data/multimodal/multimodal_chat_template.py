@@ -13,12 +13,12 @@
 # limitations under the License.
 
 
-import random
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from typing import Dict, List, Literal, Sequence
 
 import torch
+import random
 from transformers import AutoTokenizer, PreTrainedTokenizer
 
 from ...utils import logging
@@ -32,7 +32,7 @@ logger = logging.get_logger(__name__)
 class MultimodalChatTemplate(ChatTemplate):
     @abstractmethod
     def encode_messages(
-        self, messages: Sequence[Dict[str, str]], num_tokens: Dict[str, List[int]] = defaultdict(list), **kwargs
+        self, messages: Sequence[Dict[str, str]], mm_num_tokens: Dict[str, List[int]], max_seq_len: int
     ) -> Dict[str, List[int]]:
         """
         Encodes messages to a dictionary of input_ids, attention_mask, labels, and mm with mm_seqlens.
@@ -93,7 +93,7 @@ class PretrainTemplate(MultimodalChatTemplate):
     """
 
     def encode_messages(
-        self, messages: Sequence[Dict[str, str]], num_tokens: Dict = defaultdict(list), **kwargs
+        self, messages: Sequence[Dict[str, str]], mm_num_tokens: Dict = defaultdict(lambda: [1]), **kwargs
     ) -> Dict[str, List[int]]:
         messages = messages[:2]
         assert messages[0][0] == "user"
@@ -122,7 +122,7 @@ class PretrainTemplate(MultimodalChatTemplate):
             assistant_content = messages[1][:1]  # [] if eval
 
         converted_messages = [["user"] + user_content, ["assistant"] + assistant_content]
-        mm_num_token = num_tokens[mm][0]
+        mm_num_token = mm_num_tokens[mm][0]
 
         input_ids, labels = [], []
         for message in converted_messages:
@@ -146,7 +146,7 @@ class PretrainTemplate(MultimodalChatTemplate):
 
         # mask multimodal label, set output_multimodal_token to input_ids
         input_mask = labels == IGNORE_INDEX
-        for mm_type in num_tokens.keys():
+        for mm_type in mm_num_tokens.keys():
             mm_mask = input_ids == TYPE2INDEX["input"][mm_type]
             input_mm_mask = input_mask & mm_mask
             output_mm_mask = ~input_mask & mm_mask
@@ -160,10 +160,10 @@ class PretrainTemplate(MultimodalChatTemplate):
 
 class SFTTemplate(MultimodalChatTemplate):
     def encode_messages(
-        self, messages: Sequence[Dict[str, str]], num_tokens: Dict[str, List[int]] = defaultdict(list), **kwargs
+        self, messages: Sequence[Dict[str, str]], mm_num_tokens: Dict[str, List[int]], **kwargs
     ) -> Dict[str, List[int]]:
         input_ids, labels = [], []
-        mm_index = dict.fromkeys(num_tokens.keys(), 0)
+        mm_index = dict.fromkeys(mm_num_tokens.keys(), 0)
         for message_list in messages:
             role = message_list[0]
             message_list = message_list[1:]
@@ -187,7 +187,7 @@ class SFTTemplate(MultimodalChatTemplate):
                 content_type = message[0]
                 content = message[1]
                 if content_type != "text":
-                    num_token = num_tokens[content_type][mm_index[content_type]]
+                    num_token = mm_num_tokens[content_type][mm_index[content_type]]
                     mm_index[content_type] += 1
                 else:
                     num_token = None
@@ -206,7 +206,7 @@ class SFTTemplate(MultimodalChatTemplate):
 
         # mask multimodal label, set output_multimodal_token to input_ids
         input_mask = labels == IGNORE_INDEX
-        for mm_type in num_tokens.keys():
+        for mm_type in mm_num_tokens.keys():
             mm_mask = input_ids == TYPE2INDEX["input"][mm_type]
             input_mm_mask = input_mask & mm_mask
             output_mm_mask = ~input_mask & mm_mask
@@ -235,53 +235,43 @@ class ConversationMMTagTemplate(MMTag, SFTTemplate):
 
 
 class Qwen2VLTemplate(MultimodalChatTemplate):
-    def __init__(self, tokenizer: PreTrainedTokenizer, **kwargs) -> None:
+    def __init__(self, tokenizer: PreTrainedTokenizer) -> None:
         super().__init__(tokenizer)
         self.image_pad = "<|image_pad|>"
-        self.video_pad = "<|video_pad|>"
         self.image_token_id = self.tokenizer.convert_tokens_to_ids(self.image_pad)
-        self.video_token_id = self.tokenizer.convert_tokens_to_ids(self.video_pad)
-        self.image_start_id = self.tokenizer.convert_tokens_to_ids("<|vision_start|>")  # 151652
-        self.image_end_id = self.tokenizer.convert_tokens_to_ids("<|vision_end|>")  # 151653
-        self.eos = self.tokenizer.encode("<|im_end|>\n", add_special_tokens=False)  # [151645, 198]
-        self.bos = self.tokenizer.encode("<|im_start|>", add_special_tokens=False)
+        self.image_start_id = self.tokenizer.convert_tokens_to_ids("<|vision_start|>")
+        self.eos = self.tokenizer.encode("<|im_end|>\n", add_special_tokens=False)
 
         logger.info_rank0("Qwen2VLTemplate will not truncate sequence when longer than [max_seq_lens].")
 
-        self.cfg_ratio = kwargs.get("cfg_ratio", None)
-
-    @property
-    def _unconditioned_generation(self):
-        return self.cfg_ratio and random.random() < self.cfg_ratio
-
     def image_pattern(self, token_num):
-        return "<|vision_start|>" + self.image_pad * token_num + "<|vision_end|>"
-
-    def video_pattern(self, token_num):
-        return "<|vision_start|>" + self.video_pad * token_num + "<|vision_end|>"
+        if self.template_type == "pretrain" or self.template_type == "conversation":
+            return "<|vision_start|>" + self.image_pad * token_num + "<|vision_end|>"
+        elif self.template_type == "pretrain_stg1":
+            return self.image_pad * token_num
+        else:
+            raise ValueError(f"Unknown template type: {self.template_type}")
 
     @abstractmethod
-    def encode_messages(self, messages: Sequence[Dict[str, str]], **kwargs) -> Dict[str, List[int]]:
+    def encode_messages(self, messages: Sequence[Dict[str, str]]) -> Dict[str, List[int]]:
         pass
 
 
-class Qwen2VLPretrainTemplate(Qwen2VLTemplate):  # For Omni Only
+class Qwen2VLPretrainTemplate(Qwen2VLTemplate):
+    template_type = "pretrain"
+
     def encode_messages(
-        self, conversations: Sequence[Dict[str, str]], num_tokens: Dict[str, List[int]] = defaultdict(list), **kwargs
+        self, conversations: Sequence[Dict[str, str]], mm_num_tokens: Dict[str, List[int]]
     ) -> Dict[str, List[int]]:
         messages = []
-        data_type = ""
-        mm_num_tokens = {key: iter(item) for key, item in num_tokens.items()}
         for message in conversations:
             role = message[0]
             content = ""
             for item in message[1:]:
                 mm_type = item[0]
                 if mm_type == "image":
-                    data_type = "t2i" if role == "assistant" else "i2t"
-                    content += self.image_pattern(next(mm_num_tokens[mm_type]))
-                elif mm_type == "video":
-                    content += self.video_pattern(next(mm_num_tokens[mm_type]))
+                    content += self.image_pattern(mm_num_tokens[mm_type][0])
+                    mm_num_tokens[mm_type] = mm_num_tokens[mm_type][1:]
                 else:
                     content += item[1]
             messages.append(
@@ -293,26 +283,77 @@ class Qwen2VLPretrainTemplate(Qwen2VLTemplate):  # For Omni Only
             )
 
         input_ids, attention_mask, labels = [], [], []
-        input_ids += self.bos
-        attention_mask += [1] * len(self.bos)
-        labels += self.bos
         for message in messages:
             content_str = message["content"].strip()
             content_ids = self.tokenizer.encode(content_str, add_special_tokens=False)
-            loss_mask = message["loss_mask"]
-            if content_str == "":  # eval
-                break
-            if role == "user" and data_type == "t2i" and self._unconditioned_generation:  # unconditioned generation
-                input_ids += [self.tokenizer.pad_token_id] * len(content_ids)
-            else:
-                input_ids += content_ids
-
+            input_ids += content_ids
             attention_mask += [1] * len(content_ids)
-            if loss_mask == 1:
+            if message["loss_mask"] == 1:
                 labels += content_ids
-                input_ids += self.eos
-                attention_mask += [1] * len(self.eos)
-                labels += self.eos
+            else:
+                labels += [IGNORE_INDEX] * len(content_ids)
+        input_ids += self.eos
+        attention_mask += [1] * len(self.eos)
+        labels += self.eos
+
+        tokenized_example = {"input_ids": input_ids, "attention_mask": attention_mask, "labels": labels}
+        tokenized_example = {k: torch.tensor(v) for k, v in tokenized_example.items()}
+
+        # change qwen2vl_tokenized_image_id to seedomni_image_id
+        image_mask = tokenized_example["input_ids"] == self.image_token_id
+        input_mask = tokenized_example["labels"] == IGNORE_INDEX
+        input_image_mask = image_mask & input_mask
+        output_image_mask = image_mask & ~input_mask
+        tokenized_example["input_ids"][input_image_mask] = TYPE2INDEX["input"]["image"]
+        tokenized_example["input_ids"][output_image_mask] = TYPE2INDEX["output"]["image"]
+        tokenized_example["labels"][output_image_mask] = IGNORE_INDEX  # the label will be filled in decoder.
+
+        return tokenized_example
+
+
+class Qwen2VLPretrainSTG1Template(Qwen2VLPretrainTemplate):
+    template_type = "pretrain_stg1"
+
+
+class Qwen2VLChatTemplate(Qwen2VLTemplate):
+    template_type = "conversation"
+
+    def encode_messages(
+        self, conversations: Sequence[Dict[str, str]], mm_num_tokens: Dict[str, List[int]]
+    ) -> Dict[str, List[int]]:
+        image_index = 0
+        messages = []
+        token_num_list = mm_num_tokens.pop("image", [])
+        assert len(mm_num_tokens) == 0
+        for message in conversations:
+            role = message[0]
+            content = ""
+            for value in message[1:]:
+                if value[0] == "text":
+                    content += value[1]
+                else:
+                    assert value[0] == "image"
+                    content += self.image_pattern(token_num_list[image_index])
+                    image_index += 1
+            messages.append(
+                {
+                    "role": role,
+                    "content": content,
+                    "loss_mask": 1 if role == "assistant" else 0,
+                }
+            )
+
+        input_ids, attention_mask, labels = [], [], []
+        for message in messages:
+            if message["content"] == "":  # eval
+                content_str = "<|im_start|>" + message["role"] + "\n"
+            else:
+                content_str = "<|im_start|>" + message["role"] + "\n" + message["content"].strip() + "<|im_end|>\n"
+            content_ids = self.tokenizer.encode(content_str, add_special_tokens=False)
+            input_ids += content_ids
+            attention_mask += [1] * len(content_ids)
+            if message["loss_mask"] == 1:
+                labels += content_ids
             else:
                 labels += [IGNORE_INDEX] * len(content_ids)
 
@@ -328,15 +369,36 @@ class Qwen2VLPretrainTemplate(Qwen2VLTemplate):  # For Omni Only
         tokenized_example["input_ids"][output_image_mask] = TYPE2INDEX["output"]["image"]
         tokenized_example["labels"][output_image_mask] = IGNORE_INDEX  # the label will be filled in decoder.
 
-        if data_type == "t2i":  # t2i doesn't train <|vision_start|> and <|vision_end|>
-            labels = tokenized_example["labels"]
-            labels[~output_image_mask] = IGNORE_INDEX
-            tokenized_example["labels"] = labels
         return tokenized_example
 
 
-class Qwen2VLChatTemplate(Qwen2VLTemplate):
+class Qwen2_5VLTemplate(MultimodalChatTemplate):
+    def __init__(self, tokenizer: PreTrainedTokenizer, **kwargs) -> None:
+        super().__init__(tokenizer)
+        self.image_pad = "<|image_pad|>"
+        self.image_token_id = self.tokenizer.convert_tokens_to_ids(self.image_pad)
+        self.image_start_id = self.tokenizer.convert_tokens_to_ids("<|vision_start|>")
+        self.eos = self.tokenizer.encode("<|im_end|>\n", add_special_tokens=False)
+
+        logger.info_rank0("Qwen2_5VLTemplate will not truncate sequence when longer than [max_seq_lens].")
+
+    def image_pattern(self, token_num):
+        if self.template_type == "conversation":
+            return "<|vision_start|>" + self.image_pad * token_num + "<|vision_end|>"
+        else:
+            raise ValueError(f"Unknown template type: {self.template_type}")
+
+    @abstractmethod
+    def encode_messages(self, messages: Sequence[Dict[str, str]]) -> Dict[str, List[int]]:
+        pass
+
+
+class Qwen2_5VLChatTemplate(Qwen2_5VLTemplate):
+    template_type = "conversation"
     system_prompt = "You are a helpful assistant."
+
+    def _set_system_prompt(self, system_prompt: str):
+        self.system_prompt = system_prompt
 
     def _get_system_mesage(self):
         system_message = {
@@ -347,26 +409,25 @@ class Qwen2VLChatTemplate(Qwen2VLTemplate):
         return system_message
 
     def encode_messages(
-        self, conversations: Sequence[Dict[str, str]], num_tokens: Dict[str, List[int]] = defaultdict(list), **kwargs
+        self,
+        conversations: Sequence[Dict[str, str]],
+        mm_num_tokens: Dict[str, List[int]],
     ) -> Dict[str, List[int]]:
-        sys_msg = self._get_system_mesage()
-        messages = [] if sys_msg is None else [sys_msg]
-        data_type = ""
-        image_token_num_list = iter(num_tokens.pop("image", []))
-        video_token_num_list = iter(num_tokens.pop("video", []))
+        image_index = 0
+        messages = []
+        token_num_list = mm_num_tokens.pop("image", [])
+        assert len(mm_num_tokens) == 0
+        # messages.append(self._get_system_mesage())
         for message in conversations:
             role = message[0]
             content = ""
             for value in message[1:]:
                 if value[0] == "text":
                     content += value[1]
-                elif value[0] == "image":
-                    data_type = "t2i" if role == "assistant" else "i2t"
-                    content += self.image_pattern(next(image_token_num_list))
-                elif value[0] == "video":
-                    content += self.video_pattern(next(video_token_num_list))
                 else:
-                    raise ValueError(f"Unknown value type: {value[0]}")
+                    assert value[0] == "image"
+                    content += self.image_pattern(token_num_list[image_index])
+                    image_index += 1
             messages.append(
                 {
                     "role": role,
@@ -377,172 +438,71 @@ class Qwen2VLChatTemplate(Qwen2VLTemplate):
 
         input_ids, attention_mask, labels = [], [], []
         for message in messages:
-            content_str = message["content"].strip()
-            loss_mask = message["loss_mask"]
-            role = message["role"]
-            message_ids = self.tokenizer.encode("<|im_start|>" + message["role"] + "\n", add_special_tokens=False)
-
-            if content_str:
-                end_ids = self.tokenizer.encode("<|im_end|>\n", add_special_tokens=False)
-                content_ids = self.tokenizer.encode(content_str, add_special_tokens=False)
-                if (
-                    role == "user" and data_type == "t2i" and self._unconditioned_generation
-                ):  # unconditioned generation
-                    message_ids += [self.tokenizer.pad_token_id] * len(content_ids) + end_ids
-                else:
-                    message_ids += content_ids + end_ids
-
-            input_ids += message_ids
-            attention_mask += [1] * len(message_ids)
-            if loss_mask == 1:
-                labels += message_ids
+            if message["content"] == "":  # eval
+                content_str = "<|im_start|>" + message["role"] + "\n"
             else:
-                labels += [IGNORE_INDEX] * len(message_ids)
+                content_str = "<|im_start|>" + message["role"] + "\n" + message["content"].strip() + "<|im_end|>\n"
+            content_ids = self.tokenizer.encode(content_str, add_special_tokens=False)
+            input_ids += content_ids
+            attention_mask += [1] * len(content_ids)
+            if message["loss_mask"] == 1:
+                labels += content_ids
+            else:
+                labels += [IGNORE_INDEX] * len(content_ids)
 
         tokenized_example = {"input_ids": input_ids, "attention_mask": attention_mask, "labels": labels}
         tokenized_example = {k: torch.tensor(v) for k, v in tokenized_example.items()}
 
-        # change qwen2vl tokenized_image/video_id to seedomni_image/video_id
+        # change qwen2vl_tokenized_image_id to seedomni_image_id
         image_mask = tokenized_example["input_ids"] == self.image_token_id
         input_mask = tokenized_example["labels"] == IGNORE_INDEX
         input_image_mask = image_mask & input_mask
         output_image_mask = image_mask & ~input_mask
         tokenized_example["input_ids"][input_image_mask] = TYPE2INDEX["input"]["image"]
         tokenized_example["input_ids"][output_image_mask] = TYPE2INDEX["output"]["image"]
-
-        video_mask = tokenized_example["input_ids"] == self.video_token_id
-        tokenized_example["input_ids"][video_mask] = TYPE2INDEX["input"]["video"]
         tokenized_example["labels"][output_image_mask] = IGNORE_INDEX  # the label will be filled in decoder.
-        if data_type == "t2i":  # t2i doesn't train <|vision_start|>
-            labels = tokenized_example["labels"]
-            labels[labels == self.image_start_id] = IGNORE_INDEX
-            tokenized_example["labels"] = labels
 
         return tokenized_example
 
 
-class Qwen25OmniChatTemplate(Qwen2VLChatTemplate):
-    system_prompt = (
-        "You are Qwen, a virtual human developed by the Qwen Team, "
-        "Alibaba Group, capable of perceiving auditory and visual inputs, "
-        "as well as generating text and speech."
-    )
+class Qwen2_5VLFocalChatTemplate(Qwen2_5VLTemplate):
+    template_type = "conversation"
+    system_prompt = "You are a helpful assistant."
 
-    def __init__(self, tokenizer: PreTrainedTokenizer, **kwargs) -> None:
-        MultimodalChatTemplate.__init__(self, tokenizer)
-        self.image_pad = "<|IMAGE|>"
-        self.video_pad = "<|VIDEO|>"
-        self.audio_pad = "<|AUDIO|>"
-        self.vision_bos_token = "<|vision_bos|>"
-        self.vision_eos_token = "<|vision_eos|>"
-        self.audio_bos_token = "<|audio_bos|>"
-        self.audio_eos_token = "<|audio_eos|>"
+    def _set_system_prompt(self, system_prompt: str):
+        self.system_prompt = system_prompt
 
-        self.image_token_id = self.tokenizer.convert_tokens_to_ids(self.image_pad)  # 151655
-        self.video_token_id = self.tokenizer.convert_tokens_to_ids(self.video_pad)  # 151656
-        self.audio_token_id = self.tokenizer.convert_tokens_to_ids(self.audio_pad)  # 151646
-
-        self.vision_bos_id = self.tokenizer.convert_tokens_to_ids(self.vision_bos_token)  # 151652
-        self.vision_eos_id = self.tokenizer.convert_tokens_to_ids(self.vision_eos_token)  # 151653
-        self.audio_bos_id = self.tokenizer.convert_tokens_to_ids(self.audio_bos_token)  # 151647
-        self.audio_eos_id = self.tokenizer.convert_tokens_to_ids(self.audio_eos_token)  # 151648
-
-        self.bos = self.tokenizer.encode("<|im_start|>", add_special_tokens=False)
-        self.eos = self.tokenizer.encode("<|im_end|>\n", add_special_tokens=False)  # [151645, 198]
-
-        # TODO: maybe customized these
-        self.seconds_per_chunk = 2.0
-        self.position_id_per_seconds = 25
-        self.video_second_per_grid = 1.0
-
-        logger.info_rank0("Qwen25OmniTemplate will not truncate sequence when longer than [max_seq_lens].")
-
-    def image_pattern(self, token_num):
-        return self.vision_bos_token + self.image_pad * token_num + self.vision_eos_token
-
-    def get_chunked_index(self, token_indices, tokens_per_chunk):
-        """Copied from processing_qwen2_5_omni.py"""
-
-        def _iter():
-            i, start_idx = 0, 0
-            current_chunk = 1
-            while i < len(token_indices):
-                if token_indices[i] >= current_chunk * tokens_per_chunk:
-                    yield (start_idx, i)
-                    start_idx = i
-                    current_chunk += 1
-                i += 1
-            yield (start_idx, len(token_indices))
-
-        return list(_iter())
-
-    def video_pattern(
-        self, video_token_num: torch.Tensor, audio_token_num: torch.Tensor, curr_video_grid_thw: torch.Tensor
-    ):
-        if audio_token_num == 0:  # no audio with this video
-            return self.vision_bos_token + self.video_pad * video_token_num + self.vision_eos_token
-        else:
-            """Modified from processing_qwen2_5_omni.py
-            """
-            audio_token_indices = torch.arange(audio_token_num)
-            merge_size = torch.sqrt(curr_video_grid_thw.prod() // video_token_num).int()
-            height = (curr_video_grid_thw[1] // merge_size).item()
-            width = (curr_video_grid_thw[2] // merge_size).item()
-            video_token_indices = torch.arange(curr_video_grid_thw[0]).reshape(-1, 1, 1)
-            video_token_indices = video_token_indices.expand(-1, height, width).reshape(-1)
-            video_token_indices = video_token_indices * self.video_second_per_grid * self.position_id_per_seconds
-
-            tokens_per_chunk = int(self.position_id_per_seconds * self.seconds_per_chunk)
-            video_chunk_indexes = self.get_chunked_index(video_token_indices, tokens_per_chunk)
-            audio_chunk_indexes = self.get_chunked_index(audio_token_indices, tokens_per_chunk)
-
-            content = self.vision_bos_token + self.audio_bos_token
-            for j in range(max(len(video_chunk_indexes), len(audio_chunk_indexes))):
-                if j < len(video_chunk_indexes):
-                    video_seq_length = video_chunk_indexes[j][1] - video_chunk_indexes[j][0]
-                    content += self.video_pad * video_seq_length
-                if j < len(audio_chunk_indexes):
-                    audio_seq_length = audio_chunk_indexes[j][1] - audio_chunk_indexes[j][0]
-                    content += self.audio_pad * audio_seq_length
-            content += self.audio_eos_token + self.vision_eos_token
-            return content
-
-    def audio_pattern(self, token_num):
-        return self.audio_bos_token + self.audio_pad * token_num + self.audio_eos_token
+    def _get_system_mesage(self):
+        system_message = {
+            "role": "system",
+            "content": self.system_prompt,
+            "loss_mask": 0,
+        }
+        return system_message
 
     def encode_messages(
-        self, conversations: Sequence[Dict[str, str]], num_tokens: Dict[str, List[int]] = defaultdict(list), **kwargs
+        self,
+        conversations: Sequence[Dict[str, str]],
+        mm_num_tokens: Dict[str, List[int]],
     ) -> Dict[str, List[int]]:
-        sys_msg = self._get_system_mesage()
-        messages = [] if sys_msg is None else [sys_msg]
-        multimodal_num_tokens = {key: iter(item) for key, item in num_tokens.items()}  # image, video, audio
-
-        video_grid_thw = kwargs.get("grid_thw", {}).get("video", None)
-        video_grid_thw = iter(video_grid_thw) if video_grid_thw is not None else None
-
+        image_index = 0
+        messages = []
+        token_num_list = mm_num_tokens.pop("image", [])
+        assert len(mm_num_tokens) == 0
+        # messages.append(self._get_system_mesage())
+        last_assistent_content = ""
+        focal_alpha = 1.0
+        #min_focal_alpha = 3 / (len(conversations)+10)
         for message in conversations:
             role = message[0]
             content = ""
             for value in message[1:]:
                 if value[0] == "text":
                     content += value[1]
-                elif value[0] == "image":
-                    content += self.image_pattern(next(multimodal_num_tokens["image"]))
-                elif value[0] == "video":
-                    if video_grid_thw is None:
-                        raise ValueError(
-                            f"video_grid_thw: {video_grid_thw} is None. "
-                            "Make sure your video processor outputs `grid_thw`."
-                        )
-                    content += self.video_pattern(
-                        next(multimodal_num_tokens["video"]),
-                        next(multimodal_num_tokens["audio"]),
-                        curr_video_grid_thw=next(video_grid_thw),
-                    )
-                elif value[0] == "audio":
-                    content += self.audio_pattern(next(multimodal_num_tokens["audio"]))
                 else:
-                    raise ValueError(f"Unknown value type: {value[0]}")
+                    assert value[0] == "image"
+                    content += self.image_pattern(token_num_list[image_index])
+                    image_index += 1                
             messages.append(
                 {
                     "role": role,
@@ -550,56 +510,151 @@ class Qwen25OmniChatTemplate(Qwen2VLChatTemplate):
                     "loss_mask": 1 if role == "assistant" else 0,
                 }
             )
+            if role == "assistant":
+                if last_assistent_content == content:
+                    focal_alpha *= 0.75
+                    #focal_alpha = max(min_focal_alpha, focal_alpha)
+                    if random.random() > focal_alpha:
+                        messages[-1]["loss_mask"] = 0
+                else:
+                    focal_alpha = 1.0
+                last_assistent_content = content
+        #if messages[-1]["role"] == "assistant":
+            #messages[-1]["loss_mask"] = 1
+
         input_ids, attention_mask, labels = [], [], []
+        
+        content_strs = ""
         for message in messages:
-            content_str = message["content"].strip()
-            loss_mask = message["loss_mask"]
-            role = message["role"]
-            if content_str:
-                content_str = "<|im_start|>" + message["role"] + "\n" + content_str + "<|im_end|>\n"
-            else:
+            if message["content"] == "":  # eval
                 content_str = "<|im_start|>" + message["role"] + "\n"
-
-            message_ids = self.tokenizer.encode(content_str, add_special_tokens=False)
-            input_ids += message_ids
-            attention_mask += [1] * len(message_ids)
-            if loss_mask == 1:
-                labels += message_ids
             else:
-                labels += [IGNORE_INDEX] * len(message_ids)
-
+                content_str = "<|im_start|>" + message["role"] + "\n" + message["content"].strip() + "<|im_end|>\n"
+            content_strs += content_str
+            
+            content_ids = self.tokenizer.encode(content_str, add_special_tokens=False)
+            input_ids += content_ids
+            attention_mask += [1] * len(content_ids)
+            if message["loss_mask"] == 1:
+                labels += content_ids
+            else:
+                labels += [IGNORE_INDEX] * len(content_ids)
+        #print([message["loss_mask"] for message  in messages])
+        #print(content_strs)
         tokenized_example = {"input_ids": input_ids, "attention_mask": attention_mask, "labels": labels}
         tokenized_example = {k: torch.tensor(v) for k, v in tokenized_example.items()}
 
-        # change qwen25omni tokenized_image/video/audio_id to seedomni_image/video/audio_id
-        input_mask = tokenized_example["labels"] == IGNORE_INDEX
-
+        # change qwen2vl_tokenized_image_id to seedomni_image_id
         image_mask = tokenized_example["input_ids"] == self.image_token_id
+        input_mask = tokenized_example["labels"] == IGNORE_INDEX
         input_image_mask = image_mask & input_mask
         output_image_mask = image_mask & ~input_mask
         tokenized_example["input_ids"][input_image_mask] = TYPE2INDEX["input"]["image"]
         tokenized_example["input_ids"][output_image_mask] = TYPE2INDEX["output"]["image"]
-
-        # no video/audio output currently
-        video_mask = tokenized_example["input_ids"] == self.video_token_id
-        tokenized_example["input_ids"][video_mask] = TYPE2INDEX["input"]["video"]
-
-        audio_mask = tokenized_example["input_ids"] == self.audio_token_id
-        tokenized_example["input_ids"][audio_mask] = TYPE2INDEX["input"]["audio"]
-
         tokenized_example["labels"][output_image_mask] = IGNORE_INDEX  # the label will be filled in decoder.
+
         return tokenized_example
 
 
+class Qwen2_5VLFocalNewChatTemplate(Qwen2_5VLTemplate):
+    template_type = "conversation"
+    system_prompt = "You are a helpful assistant."
+
+    def _set_system_prompt(self, system_prompt: str):
+        self.system_prompt = system_prompt
+
+    def _get_system_mesage(self):
+        system_message = {
+            "role": "system",
+            "content": self.system_prompt,
+            "loss_mask": 0,
+        }
+        return system_message
+
+    def encode_messages(
+        self,
+        conversations: Sequence[Dict[str, str]],
+        mm_num_tokens: Dict[str, List[int]],
+    ) -> Dict[str, List[int]]:
+        image_index = 0
+        messages = []
+        token_num_list = mm_num_tokens.pop("image", [])
+        assert len(mm_num_tokens) == 0
+        # messages.append(self._get_system_mesage())
+        last_assistent_content = ""
+        focal_alpha = 1.0
+        #min_focal_alpha = 3 / (len(conversations)+10)
+        for message in conversations:
+            role = message[0]
+            content = ""
+            for value in message[1:]:
+                if value[0] == "text":
+                    content += value[1]
+                else:
+                    assert value[0] == "image"
+                    content += self.image_pattern(token_num_list[image_index])
+                    image_index += 1                
+            messages.append(
+                {
+                    "role": role,
+                    "content": content,
+                    "loss_mask": 1 if role == "assistant" else 0,
+                }
+            )
+            if role == "assistant":
+                if last_assistent_content == content:
+                    focal_alpha *= 0.75
+                    #focal_alpha = max(min_focal_alpha, focal_alpha)
+                    if random.random() > focal_alpha:
+                        messages[-1]["loss_mask"] = 0
+                else:
+                    focal_alpha = 1.0
+                last_assistent_content = content
+        #if messages[-1]["role"] == "assistant":
+            #messages[-1]["loss_mask"] = 1
+
+        input_ids, attention_mask, labels = [], [], []
+        
+        content_strs = ""
+        for message in messages:
+            if message["content"] == "":  # eval
+                content_str = "<|im_start|>" + message["role"] + "\n"
+            else:
+                content_str = "<|im_start|>" + message["role"] + "\n" + message["content"].strip() + "<|im_end|>\n"
+            content_strs += content_str
+            
+            content_ids = self.tokenizer.encode(content_str, add_special_tokens=False)
+            input_ids += content_ids
+            attention_mask += [1] * len(content_ids)
+            if message["loss_mask"] == 1:
+                labels += content_ids
+            else:
+                labels += [IGNORE_INDEX] * len(content_ids)
+        #print([message["loss_mask"] for message  in messages])
+        #print(content_strs)
+        tokenized_example = {"input_ids": input_ids, "attention_mask": attention_mask, "labels": labels}
+        tokenized_example = {k: torch.tensor(v) for k, v in tokenized_example.items()}
+
+        # change qwen2vl_tokenized_image_id to seedomni_image_id
+        image_mask = tokenized_example["input_ids"] == self.image_token_id
+        input_mask = tokenized_example["labels"] == IGNORE_INDEX
+        input_image_mask = image_mask & input_mask
+        output_image_mask = image_mask & ~input_mask
+        tokenized_example["input_ids"][input_image_mask] = TYPE2INDEX["input"]["image"]
+        tokenized_example["input_ids"][output_image_mask] = TYPE2INDEX["output"]["image"]
+        tokenized_example["labels"][output_image_mask] = IGNORE_INDEX  # the label will be filled in decoder.
+
+        return tokenized_example
+
 class JanusChatTemplate(ChatmlTemplate):
-    def __init__(self, tokenizer: PreTrainedTokenizer, use_system_prompt=True) -> None:
+    def __init__(self, tokenizer: PreTrainedTokenizer) -> None:
         super().__init__(tokenizer)
         self.image_pad = "<image_placeholder>"
         self.image_start_tag = "<begin_of_image>"
         self.image_end_tag = "<end_of_image>"
         self.image_token_id = self.tokenizer.convert_tokens_to_ids(self.image_pad)
         self.image_start_id = self.tokenizer.convert_tokens_to_ids(self.image_start_tag)
-        self.use_system_prompt = use_system_prompt
+        self.use_system_prompt = True
         self.system_prompt = (
             "You are a helpful language and vision assistant. "
             "You are able to understand the visual content that the user provides, "
@@ -614,16 +669,12 @@ class JanusChatTemplate(ChatmlTemplate):
         return self.image_start_tag + self.image_pad * token_num + self.image_end_tag
 
     def encode_messages(
-        self,
-        conversations: Sequence[Dict[str, str]],
-        num_tokens: Dict[str, List[int]] = defaultdict(list),
-        max_seq_len: int = 8192,
-        **kwargs,
+        self, conversations: Sequence[Dict[str, str]], mm_num_tokens: Dict[str, List[int]], max_seq_len: int = 8192
     ) -> Dict[str, List[int]]:
         image_index = 0
-        token_num_list = num_tokens.pop("image", [])
+        token_num_list = mm_num_tokens.pop("image")
+        assert len(mm_num_tokens) == 0
         messages = []
-        use_system_prompt = False
         for i, message in enumerate(conversations):
             role = message[0]
             message = message[1:]
@@ -632,7 +683,6 @@ class JanusChatTemplate(ChatmlTemplate):
                 if value[0] == "text":
                     content += value[1]
                 else:
-                    use_system_prompt = True if role == "user" else use_system_prompt
                     assert value[0] == "image"
                     content += self.image_pattern(token_num_list[image_index])
                     image_index += 1
@@ -644,7 +694,7 @@ class JanusChatTemplate(ChatmlTemplate):
                 }
             )
 
-        if use_system_prompt:
+        if self.use_system_prompt:
             input_ids = self.tokenizer.encode(self.system_prompt + self.sep1)
             attention_mask = [1] * len(input_ids)
             labels = [IGNORE_INDEX] * len(input_ids)
@@ -654,341 +704,33 @@ class JanusChatTemplate(ChatmlTemplate):
             labels = [IGNORE_INDEX] * len(input_ids)
 
         for i, message in enumerate(messages):
-            role: str = message["role"]
-            if role == "user":
-                content_str = role.capitalize() + ": " + message["content"] + self.sep1
-                content_ids = self.tokenizer.encode(content_str, add_special_tokens=False)
-                input_ids += content_ids
-                attention_mask += [1] * len(content_ids)
-                labels += [IGNORE_INDEX] * len(content_ids)
+            if message["content"] == "":  # eval
+                content_str = message["role"].capitalize() + ":"
             else:
-                content_str = role.capitalize() + ":"
-                content_ids = self.tokenizer.encode(content_str, add_special_tokens=False)
-                input_ids += content_ids
-                attention_mask += [1] * len(content_ids)
-                labels += [IGNORE_INDEX] * len(content_ids)
-                if message["content"]:
-                    content_str = message["content"] + self.sep2
-                    content_ids = self.tokenizer.encode(content_str, add_special_tokens=False)
-                    input_ids += content_ids
-                    attention_mask += [1] * len(content_ids)
-                    labels += content_ids
+                sep = self.sep2 if i % 2 == 1 else self.sep1
+                content_str = message["role"].capitalize() + ": " + message["content"] + sep
 
-        tokenized_example = {"input_ids": input_ids, "attention_mask": attention_mask, "labels": labels}
-        tokenized_example = {k: torch.tensor(v) for k, v in tokenized_example.items()}
-
-        image_mask = tokenized_example["input_ids"] == self.image_token_id
-        input_mask = tokenized_example["labels"] == IGNORE_INDEX
-        input_image_mask = image_mask & input_mask
-        output_image_mask = image_mask & ~input_mask
-        tokenized_example["input_ids"][input_image_mask] = TYPE2INDEX["input"]["image"]
-        tokenized_example["input_ids"][output_image_mask] = TYPE2INDEX["output"]["image"]
-        tokenized_example["labels"][output_image_mask] = IGNORE_INDEX  # the label will be filled in decoder.
-        if not use_system_prompt:
-            tokenized_example["labels"][tokenized_example["labels"] == self.eos[0]] = (
-                IGNORE_INDEX  # eos seems not trained in Janus
-            )
-            tokenized_example["labels"][tokenized_example["labels"] == self.image_start_id] = (
-                IGNORE_INDEX  # image_start_id seems not trained in Janus
-            )
-        return tokenized_example
-
-
-class LlamaPretrainTemplate(MultimodalChatTemplate):  # For Omni Only
-    def __init__(self, tokenizer: PreTrainedTokenizer, **kwargs) -> None:
-        super().__init__(tokenizer)
-        self.vision_bos_token = "<|vision_start|>"
-        self.vision_eos_token = "<|vision_end|>"
-        self.audio_bos_token = "<|audio_start|>"
-        self.audio_eos_token = "<|audio_end|>"
-        num_add = self.tokenizer.add_tokens(
-            [self.vision_bos_token, self.vision_eos_token, self.audio_bos_token, self.audio_eos_token]
-        )
-        num_add += self.tokenizer.add_special_tokens({"pad_token": "<|pad|>"})
-        self.add_token_num = num_add
-
-        self.image_pad = "<|image_pad|>"
-        self.video_pad = "<|video_pad|>"
-        self.audio_pad = "<|audio_pad|>"
-        self.tokenizer.add_special_tokens(
-            {"additional_special_tokens": [self.image_pad, self.video_pad, self.audio_pad]}
-        )
-
-        self.image_token_id = self.tokenizer.convert_tokens_to_ids(self.image_pad)
-        self.video_token_id = self.tokenizer.convert_tokens_to_ids(self.video_pad)
-        self.audio_token_id = self.tokenizer.convert_tokens_to_ids(self.audio_pad)
-
-        self.vision_bos_id = self.tokenizer.convert_tokens_to_ids("<|vision_start|>")  # 128256
-        self.vision_eos_id = self.tokenizer.convert_tokens_to_ids("<|vision_end|>")  # 128257
-        self.audio_bos_id = self.tokenizer.convert_tokens_to_ids("<|audio_start|>")
-        self.audio_eos_id = self.tokenizer.convert_tokens_to_ids("<|audio_end|>")
-
-        self.pad_token_id = self.tokenizer.convert_tokens_to_ids("<|pad|>")  # 128258
-
-        if self.add_token_num > 0:
-            self.trained_embedding = [
-                self.vision_bos_id,
-                self.vision_eos_id,
-                self.audio_bos_id,
-                self.audio_eos_id,
-                self.pad_token_id,
-            ]
-
-        # config for audio in video
-        self.seconds_per_chunk = 2.0
-        self.position_id_per_seconds = 25
-        self.video_second_per_grid = 1.0
-
-        self.eos = self.tokenizer.encode(self.tokenizer.eos_token, add_special_tokens=False)  # [128001]
-        self.bos = self.tokenizer.encode(self.tokenizer.bos_token, add_special_tokens=False)  # [128000]
-        self.cfg_ratio = kwargs.get("cfg_ratio", None)
-
-    def image_pattern(self, token_num):
-        return self.vision_bos_token + self.image_pad * token_num + self.vision_eos_token
-
-    def get_chunked_index(self, token_indices, tokens_per_chunk):
-        """Copied from processing_qwen2_5_omni.py"""
-
-        def _iter():
-            i, start_idx = 0, 0
-            current_chunk = 1
-            while i < len(token_indices):
-                if token_indices[i] >= current_chunk * tokens_per_chunk:
-                    yield (start_idx, i)
-                    start_idx = i
-                    current_chunk += 1
-                i += 1
-            yield (start_idx, len(token_indices))
-
-        return list(_iter())
-
-    def video_pattern(
-        self, video_token_num: torch.Tensor, audio_token_num: torch.Tensor, curr_video_grid_thw: torch.Tensor
-    ):
-        if audio_token_num == 0:  # no audio with this video
-            return self.vision_bos_token + self.video_pad * video_token_num + self.vision_eos_token
-        else:
-            """Modified from processing_qwen2_5_omni.py
-            """
-            audio_token_indices = torch.arange(audio_token_num)
-            merge_size = torch.sqrt(curr_video_grid_thw.prod() // video_token_num).int()
-            height = (curr_video_grid_thw[1] // merge_size).item()
-            width = (curr_video_grid_thw[2] // merge_size).item()
-            video_token_indices = torch.arange(curr_video_grid_thw[0]).reshape(-1, 1, 1)
-            video_token_indices = video_token_indices.expand(-1, height, width).reshape(-1)
-            video_token_indices = video_token_indices * self.video_second_per_grid * self.position_id_per_seconds
-
-            tokens_per_chunk = int(self.position_id_per_seconds * self.seconds_per_chunk)
-            video_chunk_indexes = self.get_chunked_index(video_token_indices, tokens_per_chunk)
-            audio_chunk_indexes = self.get_chunked_index(audio_token_indices, tokens_per_chunk)
-
-            content = self.vision_bos_token + self.audio_bos_token
-            for j in range(max(len(video_chunk_indexes), len(audio_chunk_indexes))):
-                if j < len(video_chunk_indexes):
-                    video_seq_length = video_chunk_indexes[j][1] - video_chunk_indexes[j][0]
-                    content += self.video_pad * video_seq_length
-                if j < len(audio_chunk_indexes):
-                    audio_seq_length = audio_chunk_indexes[j][1] - audio_chunk_indexes[j][0]
-                    content += self.audio_pad * audio_seq_length
-            content += self.audio_eos_token + self.vision_eos_token
-            return content
-
-    def audio_pattern(self, token_num):
-        return self.audio_bos_token + self.audio_pad * token_num + self.audio_eos_token
-
-    @property
-    def _unconditioned_generation(self):
-        return self.cfg_ratio and random.random() < self.cfg_ratio
-
-    def encode_messages(
-        self, conversations: Sequence[Dict[str, str]], num_tokens: Dict[str, List[int]] = defaultdict(list), **kwargs
-    ) -> Dict[str, List[int]]:
-        messages = []
-        multimodal_num_tokens = {key: iter(item) for key, item in num_tokens.items()}  # image, video, audio
-        data_type = ""
-        video_grid_thw = kwargs.get("grid_thw", {}).get("video", None)
-        video_grid_thw = iter(video_grid_thw) if video_grid_thw is not None else None
-
-        for message in conversations:
-            role = message[0]
-            content = ""
-            for item in message[1:]:
-                mm_type = item[0]
-                if mm_type == "text":
-                    content += item[1]
-                elif mm_type == "image":
-                    data_type = "t2i" if role == "assistant" else "i2t"
-                    content += self.image_pattern(next(multimodal_num_tokens[mm_type]))
-                elif mm_type == "video":
-                    if video_grid_thw is None:
-                        raise ValueError(
-                            f"video_grid_thw: {video_grid_thw} is None. "
-                            "Make sure your video processor outputs `grid_thw`."
-                        )
-                    content += self.video_pattern(
-                        next(multimodal_num_tokens["video"]),
-                        next(multimodal_num_tokens["audio"]),
-                        curr_video_grid_thw=next(video_grid_thw),
-                    )
-                elif mm_type == "audio":
-                    content += self.audio_pattern(next(multimodal_num_tokens["audio"]))
-                else:
-                    raise ValueError(f"Unknown value type: {item[0]}")
-            messages.append(
-                {
-                    "role": role,
-                    "content": content,
-                    "loss_mask": 1 if role == "assistant" else 0,
-                }
-            )
-        input_ids, attention_mask, labels = [], [], []
-
-        input_ids += self.bos
-        attention_mask += [1] * len(self.bos)
-        labels += [IGNORE_INDEX] * len(self.bos)
-        for message in messages:
-            content_str = message["content"].strip()
             content_ids = self.tokenizer.encode(content_str, add_special_tokens=False)
-            loss_mask = message["loss_mask"]
-            if content_str == "":  # eval
+            if len(input_ids) + len(content_ids) > max_seq_len:  # truncate
                 break
-            if role == "user" and data_type == "t2i" and self._unconditioned_generation:  # unconditioned generation
-                input_ids += [self.pad_token_id] * len(content_ids)
-            else:
-                input_ids += content_ids
-
+            input_ids += content_ids
             attention_mask += [1] * len(content_ids)
-            if loss_mask == 1:
+            if message["loss_mask"] == 1:
                 labels += content_ids
-                input_ids += self.eos
-                attention_mask += [1] * len(self.eos)
-                labels += self.eos
             else:
                 labels += [IGNORE_INDEX] * len(content_ids)
-
         tokenized_example = {"input_ids": input_ids, "attention_mask": attention_mask, "labels": labels}
         tokenized_example = {k: torch.tensor(v) for k, v in tokenized_example.items()}
 
-        # change to seedomni_image_id
-        input_mask = tokenized_example["labels"] == IGNORE_INDEX
+        # change qwen2vl_tokenized_image_id to seedomni_image_id
         image_mask = tokenized_example["input_ids"] == self.image_token_id
-
+        input_mask = tokenized_example["labels"] == IGNORE_INDEX
         input_image_mask = image_mask & input_mask
         output_image_mask = image_mask & ~input_mask
         tokenized_example["input_ids"][input_image_mask] = TYPE2INDEX["input"]["image"]
         tokenized_example["input_ids"][output_image_mask] = TYPE2INDEX["output"]["image"]
-
-        # no video/audio output currently
-        video_mask = tokenized_example["input_ids"] == self.video_token_id
-        tokenized_example["input_ids"][video_mask] = TYPE2INDEX["input"]["video"]
-
-        audio_mask = tokenized_example["input_ids"] == self.audio_token_id
-        tokenized_example["input_ids"][audio_mask] = TYPE2INDEX["input"]["audio"]
-
         tokenized_example["labels"][output_image_mask] = IGNORE_INDEX  # the label will be filled in decoder.
-
-        if data_type == "t2i":  # t2i doesn't train <|vision_start|> and <|vision_end|>
-            labels = tokenized_example["labels"]
-            labels[~output_image_mask] = IGNORE_INDEX
-            tokenized_example["labels"] = labels
         return tokenized_example
-
-
-class Qwen3MoeChatTemplate(Qwen25OmniChatTemplate):
-    def __init__(self, tokenizer: PreTrainedTokenizer, **kwargs) -> None:
-        MultimodalChatTemplate.__init__(self, tokenizer)
-        self.image_pad = "<|IMAGE|>"
-        self.video_pad = "<|VIDEO|>"
-        self.audio_pad = "<|AUDIO|>"
-
-        self.vision_bos_token = "<|vision_bos|>"
-        self.vision_eos_token = "<|vision_eos|>"
-        self.audio_bos_token = "<|audio_bos|>"
-        self.audio_eos_token = "<|audio_eos|>"
-
-        num_add = self.tokenizer.add_tokens(
-            [self.vision_bos_token, self.vision_eos_token, self.audio_bos_token, self.audio_eos_token]
-        )
-        self.add_token_num = num_add
-
-        self.tokenizer.add_special_tokens(
-            {"additional_special_tokens": [self.image_pad, self.video_pad, self.audio_pad]}
-        )
-
-        self.image_token_id = self.tokenizer.convert_tokens_to_ids(self.image_pad)
-        self.video_token_id = self.tokenizer.convert_tokens_to_ids(self.video_pad)
-        self.audio_token_id = self.tokenizer.convert_tokens_to_ids(self.audio_pad)
-
-        self.vision_bos_id = self.tokenizer.convert_tokens_to_ids(self.vision_bos_token)
-        self.vision_eos_id = self.tokenizer.convert_tokens_to_ids(self.vision_eos_token)
-        self.audio_bos_id = self.tokenizer.convert_tokens_to_ids(self.audio_bos_token)
-        self.audio_eos_id = self.tokenizer.convert_tokens_to_ids(self.audio_eos_token)
-
-        self.trained_embedding = []
-        if self.add_token_num > 0:
-            self.trained_embedding = [self.vision_bos_id, self.vision_eos_id, self.audio_bos_id, self.audio_eos_id]
-
-        self.bos = self.tokenizer.encode("<|im_start|>", add_special_tokens=False)
-        self.eos = self.tokenizer.encode("<|im_end|>\n", add_special_tokens=False)
-
-        self.seconds_per_chunk = 2.0
-        self.position_id_per_seconds = 25
-        self.video_second_per_grid = 1.0
-
-        logger.info_rank0("Qwen3MoeTemplate will not truncate sequence when longer than [max_seq_lens].")
-
-    def _get_system_mesage(self):
-        return None
-
-
-class SeedOssPretrainTemplate(LlamaPretrainTemplate):
-    def __init__(self, tokenizer: PreTrainedTokenizer, **kwargs) -> None:
-        super().__init__(tokenizer)
-        self.vision_bos_token = "<|vision_start|>"
-        self.vision_eos_token = "<|vision_end|>"
-        self.audio_bos_token = "<|audio_start|>"
-        self.audio_eos_token = "<|audio_end|>"
-        num_add = self.tokenizer.add_tokens(
-            [self.vision_bos_token, self.vision_eos_token, self.audio_bos_token, self.audio_eos_token]
-        )
-        num_add += self.tokenizer.add_special_tokens({"pad_token": "<|pad|>"})
-        self.add_token_num = num_add
-
-        self.image_pad = "<|image_pad|>"
-        self.video_pad = "<|video_pad|>"
-        self.audio_pad = "<|audio_pad|>"
-        self.tokenizer.add_special_tokens(
-            {"additional_special_tokens": [self.image_pad, self.video_pad, self.audio_pad]}
-        )
-
-        self.image_token_id = self.tokenizer.convert_tokens_to_ids(self.image_pad)
-        self.video_token_id = self.tokenizer.convert_tokens_to_ids(self.video_pad)
-        self.audio_token_id = self.tokenizer.convert_tokens_to_ids(self.audio_pad)
-
-        self.vision_bos_id = self.tokenizer.convert_tokens_to_ids("<|vision_start|>")
-        self.vision_eos_id = self.tokenizer.convert_tokens_to_ids("<|vision_end|>")
-        self.audio_bos_id = self.tokenizer.convert_tokens_to_ids("<|audio_start|>")
-        self.audio_eos_id = self.tokenizer.convert_tokens_to_ids("<|audio_end|>")
-
-        self.pad_token_id = self.tokenizer.convert_tokens_to_ids("<|pad|>")
-
-        if self.add_token_num > 0:
-            self.trained_embedding = [
-                self.vision_bos_id,
-                self.vision_eos_id,
-                self.audio_bos_id,
-                self.audio_eos_id,
-                self.pad_token_id,
-            ]
-
-        # config for audio in video
-        self.seconds_per_chunk = 2.0
-        self.position_id_per_seconds = 25
-        self.video_second_per_grid = 1.0
-
-        self.eos = self.tokenizer.encode(self.tokenizer.eos_token, add_special_tokens=False)
-        self.bos = self.tokenizer.encode(self.tokenizer.bos_token, add_special_tokens=False)
-        self.cfg_ratio = kwargs.get("cfg_ratio", None)
 
 
 TEMPLATES = {
@@ -997,18 +739,16 @@ TEMPLATES = {
     "plaintext_default": PlainTextTemplate,
     "plaintext_mmtag": PlainTextnMMTagTemplate,
     "qwen2vl": Qwen2VLChatTemplate,
+    "qwen2vl_pretrain_stg1": Qwen2VLPretrainSTG1Template,
     "qwen2vl_pretrain": Qwen2VLPretrainTemplate,
-    "qwen2_5omni": Qwen25OmniChatTemplate,
-    "qwen2_5vl": Qwen2VLChatTemplate,  # same as qwen2vl
+    "qwen2_5vl": Qwen2_5VLChatTemplate,
+    "qwen2_5vlwithfocal": Qwen2_5VLFocalChatTemplate,
     "janus": JanusChatTemplate,
-    "llama": LlamaPretrainTemplate,
-    "qwen3moe": Qwen3MoeChatTemplate,
-    "seed_oss": SeedOssPretrainTemplate,
 }
 
 
-def build_multimodal_chat_template(template_name: str, tokenizer: AutoTokenizer, **kwargs) -> "ChatTemplate":
+def build_multimodal_chat_template(template_name: str, tokenizer: AutoTokenizer) -> "ChatTemplate":
     if template_name not in TEMPLATES:
         raise ValueError(f"Unknown chat template: {template_name}")
 
-    return TEMPLATES[template_name](tokenizer, **kwargs)
+    return TEMPLATES[template_name](tokenizer)

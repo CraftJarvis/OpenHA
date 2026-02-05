@@ -12,31 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import transformers
 
-from . import (
-    janus_foundation,
-    llama_foundation,
-    qwen2_5_omni_foundation,
-    qwen2_5_vl_foundation,
-    qwen2_vl_foundation,
-    qwen3_moe_foundation,
-)
+from . import qwen2_vl_foundation
 from .base import BaseFoundationConfigMixin, BaseFoundationModelMixin
 
 
 __all__ = [
     "qwen2_vl_foundation",
-    "janus_foundation",
-    "llama_foundation",
-    "qwen2_5_vl_foundation",
-    "qwen2_5_omni_foundation",
     "BaseFoundationModelMixin",
     "BaseFoundationConfigMixin",
-    "qwen3_moe_foundation",
 ]
-
-if transformers.__version__ >= "4.56.0":
-    from . import seed_oss_foundation
-
-    __all__ += ["seed_oss_foundation"]

@@ -13,10 +13,10 @@
 # limitations under the License.
 
 
+import torch
 from transformers import PretrainedConfig
 
 from . import logging
-from .device import get_device_name
 
 
 logger = logging.get_logger(__name__)
@@ -33,7 +33,7 @@ def get_device_flops(unit="T"):
             ptr += 1
         return number
 
-    device_name = get_device_name()
+    device_name = torch.cuda.get_device_name()
     flops = float("inf")  # INF flops for unkown gpu type
     if "H100" in device_name or "H800" in device_name:
         flops = 989e12
@@ -77,7 +77,7 @@ class VeomniFlopsCounter:
             # qwen3 has additional RMSNorm layers for q and k.
             # RMSNorm layers have minimal impact at the MFU and can be ignored.
             "qwen3": self._estimate_qwen2_flops,
-            "seed_oss": self._estimate_seed_flops,
+            "seed": self._estimate_seed_flops,
         }
 
         self.config = config
@@ -178,7 +178,7 @@ class VeomniFlopsCounter:
         moe_num_expert = self.config.num_experts
         moe_topk = self.config.num_experts_per_tok
 
-        head_dim = getattr(self.config, "head_dim", self.config.hidden_size // self.config.num_attention_heads)
+        head_dim = hidden_size // num_attention_heads
         q_size = num_attention_heads * head_dim
         k_size = num_key_value_heads * head_dim
         v_size = num_key_value_heads * head_dim

@@ -21,8 +21,6 @@ from torchdata.stateful_dataloader.sampler import StatefulDistributedSampler
 
 from ..distributed.parallel_state import get_parallel_state
 from ..utils import logging
-from ..utils.device import get_device_type
-from ..utils.registry import Registry
 from .batching_strategy import TextBatchingStrategy
 from .data_collator import (
     CollatePipeline,
@@ -39,12 +37,8 @@ from .dynamic_batching import DynamicBatchSizeDataLoader
 if TYPE_CHECKING:
     from torch.utils.data import Dataset
 
-DATALOADER_REGISTRY = Registry("dataloader")
+
 logger = logging.get_logger(__name__)
-
-
-def build_dataloader(dataloader_type: str, **kwargs):
-    return DATALOADER_REGISTRY[dataloader_type](**kwargs)
 
 
 class DistributedDataloader(StatefulDataLoader):
@@ -58,8 +52,7 @@ class DistributedDataloader(StatefulDataLoader):
             self.dataset.set_epoch(epoch)
 
 
-@DATALOADER_REGISTRY.register("native")
-def build_native_dataloader(
+def build_dataloader(
     dataset: "Dataset",
     micro_batch_size: int,
     global_batch_size: int,
@@ -140,7 +133,6 @@ def build_native_dataloader(
         num_workers=num_workers,
         collate_fn=collate_fn,
         pin_memory=pin_memory,
-        pin_memory_device=get_device_type(),
         drop_last=drop_last,
         prefetch_factor=prefetch_factor,
     )

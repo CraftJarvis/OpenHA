@@ -1,9 +1,22 @@
+# Copyright 2025 Bytedance Ltd. and/or its affiliates
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
 from copy import deepcopy
 from typing import Any, Dict, Literal, Optional
 
 from transformers import AutoConfig, PretrainedConfig
-
-from ..loader import MODEL_CONFIG_REGISTRY
 
 
 def _init_config(config_dict: Optional[Dict[str, Any]]) -> Optional["PretrainedConfig"]:
@@ -15,9 +28,7 @@ def _init_config(config_dict: Optional[Dict[str, Any]]) -> Optional["PretrainedC
 
     config_dict = deepcopy(config_dict)
     model_type = config_dict.pop("model_type")
-    if model_type == "":
-        return PretrainedConfig()
-    return MODEL_CONFIG_REGISTRY[model_type]()(**config_dict)
+    return AutoConfig.for_model(model_type, **config_dict)
 
 
 class SeedOmniEncoderConfig(PretrainedConfig):
@@ -93,7 +104,5 @@ class SeedOmniConfig(PretrainedConfig):
         self.decoder_config = SeedOmniDecoderConfig(**decoder_config)
         self.foundation_config = _init_config(foundation_config)
         self.initializer_range = initializer_range
-        super().__init__(architectures=kwargs.pop("architectures", "SeedOmniForCausalLM"), **kwargs)
 
-    def get_text_config(self, decoder=False) -> PretrainedConfig:
-        return self.foundation_config
+        super().__init__(**kwargs)

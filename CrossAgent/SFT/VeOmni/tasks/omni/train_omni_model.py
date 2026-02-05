@@ -17,12 +17,12 @@ from veomni.data import (
     OmniDataCollatorWithPadding,
     OmniSequenceShardCollator,
     build_dataloader,
-    build_dataset,
+    build_iterative_dataset,
+    build_mapping_dataset,
     build_multimodal_chat_template,
 )
 from veomni.data.constants import IGNORE_INDEX
 from veomni.data.multimodal.multimodal_transform import encode_multimodal_sample
-from veomni.distributed.clip_grad_norm import veomni_clip_grad_norm
 from veomni.distributed.offloading import build_activation_offloading_context
 from veomni.distributed.parallel_state import get_parallel_state, init_parallel_state
 from veomni.distributed.torch_parallelize import build_parallelize_model
@@ -31,7 +31,6 @@ from veomni.models.seed_omni import SeedOmniModel, build_omni_model, build_omni_
 from veomni.optim import build_lr_scheduler, build_optimizer
 from veomni.utils import helper
 from veomni.utils.arguments import DataArguments, ModelArguments, TrainingArguments, parse_args
-from veomni.utils.device import get_device_type, get_torch_device, synchronize
 from veomni.utils.dist_utils import all_reduce
 from veomni.utils.model_utils import pretty_print_trainable_parameters
 
@@ -100,7 +99,7 @@ def main():
     args = parse_args(Arguments)
     logger.info(f"Process rank: {args.train.global_rank}, world size: {args.train.world_size}")
     logger.info_rank0(json.dumps(asdict(args), indent=2))
-    get_torch_device().set_device(f"{get_device_type()}:{args.train.local_rank}")
+    torch.cuda.set_device(f"cuda:{args.train.local_rank}")
     dist.init_process_group()
     helper.set_seed(args.train.seed, args.train.enable_full_determinism)
     if args.train.local_rank == 0:
@@ -228,38 +227,37 @@ def main():
             )
         )
 
-    train_dataset = build_dataset(
-        dataset_name=args.data.dataset_name,
-        transform=transform,
-        dataloader_batch_size=args.train.dataloader_batch_size,
-        seed=args.train.seed,
-        **asdict(args.data),
-    )
-    dataset_length = None if not hasattr(train_dataset, "__len__") else len(train_dataset)
-    if args.data.datasets_type == "mapping":
-        dataset_length = dataset_length / args.train.data_parallel_size
-    args.train.compute_train_steps(args.data.max_seq_len, args.data.train_size, dataset_length)
+    if args.data.dataloader_type == "native":
+        if args.data.datasets_type == "iterable":
+            logger.info_rank0("Start building iterative dataset")
+            train_dataset = build_iterative_dataset(args.data.train_path, transform=transform, seed=args.train.seed)
+            args.train.compute_train_steps(args.data.max_seq_len, args.data.train_size)
+        elif args.data.datasets_type == "mapping":
+            logger.info_rank0("Start building mapping dataset")
+            train_dataset = build_mapping_dataset(args.data.train_path, transform=transform)
+            args.train.compute_train_steps(args.data.max_seq_len, args.data.train_size, len(train_dataset))
 
-    train_dataloader = build_dataloader(
-        dataloader_type=args.data.dataloader_type,
-        dataset=train_dataset,
-        micro_batch_size=args.train.micro_batch_size,
-        global_batch_size=args.train.global_batch_size,
-        dataloader_batch_size=args.train.dataloader_batch_size,
-        seed=args.train.seed,
-        collate_fn=data_collate_fn,
-        max_seq_len=args.data.max_seq_len,
-        train_steps=args.train.train_steps,
-        rmpad=args.train.rmpad,
-        rmpad_with_pos_ids=args.train.rmpad_with_pos_ids,
-        bsz_warmup_ratio=args.train.bsz_warmup_ratio,
-        dyn_bsz_margin=args.train.dyn_bsz_margin,
-        dyn_bsz_buffer_size=args.train.dyn_bsz_buffer_size,
-        num_workers=args.data.num_workers,
-        drop_last=args.data.drop_last,
-        pin_memory=args.data.pin_memory,
-        prefetch_factor=args.data.prefetch_factor,
-    )
+        train_dataloader = build_dataloader(
+            dataset=train_dataset,
+            micro_batch_size=args.train.micro_batch_size,
+            global_batch_size=args.train.global_batch_size,
+            dataloader_batch_size=args.train.dataloader_batch_size,
+            seed=args.train.seed,
+            collate_fn=data_collate_fn,
+            max_seq_len=args.data.max_seq_len,
+            train_steps=args.train.train_steps,
+            rmpad=args.train.rmpad,
+            rmpad_with_pos_ids=args.train.rmpad_with_pos_ids,
+            bsz_warmup_ratio=args.train.bsz_warmup_ratio,
+            dyn_bsz_margin=args.train.dyn_bsz_margin,
+            dyn_bsz_buffer_size=args.train.dyn_bsz_buffer_size,
+            num_workers=args.data.num_workers,
+            drop_last=args.data.drop_last,
+            pin_memory=args.data.pin_memory,
+            prefetch_factor=args.data.prefetch_factor,
+        )
+    else:
+        raise NotImplementedError(f"Unsupported dataloader type: {args.data.dataloader_type}.")
 
     freeze_any = False
     if args.train.freeze_encoder:
@@ -293,7 +291,6 @@ def main():
 
     model = build_parallelize_model(
         model,
-        weights_path=args.model.model_path,
         enable_full_shard=args.train.enable_full_shard,
         enable_mixed_precision=args.train.enable_mixed_precision,
         enable_gradient_checkpointing=args.train.enable_gradient_checkpointing,
@@ -330,20 +327,19 @@ def main():
                 config={**vars(args.model), **vars(args.data), **vars(args.train)},  # flatten dict
             )
 
+        if args.train.enable_profiling:
+            profiler = helper.create_profiler(
+                start_step=args.train.profile_start_step,
+                end_step=args.train.profile_end_step,
+                trace_dir=args.train.profile_trace_dir,
+                record_shapes=args.train.profile_record_shapes,
+                profile_memory=args.train.profile_profile_memory,
+                with_stack=args.train.profile_with_stack,
+            )
+            profiler.start()
+
         model_assets = [model_config, processor]
         save_model_assets(args.train.model_assets_dir, model_assets)
-
-    if args.train.profile_this_rank:
-        profiler = helper.create_profiler(
-            start_step=args.train.profile_start_step,
-            end_step=args.train.profile_end_step,
-            trace_dir=args.train.profile_trace_dir,
-            record_shapes=args.train.profile_record_shapes,
-            profile_memory=args.train.profile_profile_memory,
-            with_stack=args.train.profile_with_stack,
-            global_rank=args.train.global_rank,
-        )
-        profiler.start()
 
     start_epoch, start_step, global_step = 0, 0, 0
     save_checkpoint_path = None
@@ -353,9 +349,6 @@ def main():
         rmpad=args.train.rmpad,
         rmpad_with_pos_ids=args.train.rmpad_with_pos_ids,
         empty_cache_steps=args.train.empty_cache_steps,
-        enable_multisource=args.data.enable_multisource,
-        dataloader=train_dataloader,
-        data_path=args.data.train_path,
     )
 
     if args.train.load_checkpoint_path:
@@ -410,18 +403,13 @@ def main():
 
             total_loss = 0
             total_losses = defaultdict(int)
-            synchronize()
+            torch.cuda.synchronize()
             start_time = time.time()
             for micro_batch in micro_batches:
                 environ_meter.add(micro_batch)
-                if args.data.enable_multisource:
-                    micro_batch.pop("ds_idx", None)
-                    micro_batch.pop("cur_token_num", None)
-                    micro_batch.pop("source_name", None)
 
                 micro_batch = {
-                    k: v.to(get_device_type(), non_blocking=True) if isinstance(v, torch.Tensor) else v
-                    for k, v in micro_batch.items()
+                    k: v.cuda(non_blocking=True) if isinstance(v, torch.Tensor) else v for k, v in micro_batch.items()
                 }
                 with model_fwd_context:
                     model_outputs = model(**micro_batch, use_cache=False)
@@ -438,7 +426,10 @@ def main():
 
                 del micro_batch
 
-            grad_norm = veomni_clip_grad_norm(model, args.train.max_grad_norm)
+            if args.train.data_parallel_mode == "fsdp1":
+                grad_norm = model.clip_grad_norm_(args.train.max_grad_norm).item()
+            else:
+                grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), args.train.max_grad_norm, foreach=True)
 
             optimizer.step()
             lr_scheduler.step()
@@ -450,7 +441,7 @@ def main():
             total_loss, grad_norm = all_reduce((total_loss, grad_norm), group=get_parallel_state().fsdp_group)
             for key, v in total_losses.items():
                 total_losses[key] = all_reduce((v), group=get_parallel_state().fsdp_group)
-            synchronize()
+            torch.cuda.synchronize()
             delta_time = time.time() - start_time
             lr = max(lr_scheduler.get_last_lr())
             train_metrics = environ_meter.step(delta_time=delta_time, global_step=global_step)
@@ -471,11 +462,13 @@ def main():
                     train_metrics.update({f"training/{k}": v for k, v in step_info.items()})
                     wandb.log(train_metrics, step=global_step)
 
-            if args.train.profile_this_rank and global_step <= args.train.profile_end_step:
-                profiler.step()
-                if global_step == args.train.profile_end_step:
-                    profiler.stop()
-                    helper.upload_trace(args.train.wandb_project, args.train.wandb_name, args.train.profile_trace_dir)
+                if args.train.enable_profiling and global_step <= args.train.profile_end_step:
+                    profiler.step()
+                    if global_step == args.train.profile_end_step:
+                        profiler.stop()
+                        helper.upload_trace(
+                            args.train.wandb_project, args.train.wandb_name, args.train.profile_trace_dir
+                        )
 
             if args.train.save_steps and global_step % args.train.save_steps == 0:
                 helper.empty_cache()
@@ -516,7 +509,7 @@ def main():
             dist.barrier()
             logger.info_rank0(f"Distributed checkpoint saved at {save_checkpoint_path} successfully!")
 
-    synchronize()
+    torch.cuda.synchronize()
     # release memory
     del optimizer, lr_scheduler
     helper.empty_cache()

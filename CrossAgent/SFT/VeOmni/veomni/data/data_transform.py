@@ -74,7 +74,6 @@ def process_sft_example(
     chat_template: "ChatTemplate",
     max_seq_len: int,
     text_keys: Union[str, List[str]] = "messages",
-    source_name: Optional[str] = None,
 ) -> List[Dict[str, "torch.Tensor"]]:
     if isinstance(text_keys, str):
         text_example = example[text_keys]

@@ -1,4 +1,4 @@
-from typing import Literal, Optional, Tuple
+from typing import Optional, Tuple
 
 import torch
 from transformers.modeling_flash_attention_utils import _flash_attention_forward
@@ -9,13 +9,21 @@ from ..distributed.sequence_parallel import (
     gather_seq_scatter_heads,
 )
 from ..utils import logging
-from ..utils.import_utils import is_seed_kernels_available
 
-
-if is_seed_kernels_available():
-    from seed_kernels.transformers.functional import seed_flash_attention_forward
 
 logger = logging.get_logger(__name__)
+
+
+def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
+    """
+    This is the equivalent of torch.repeat_interleave(x, dim=1, repeats=n_rep). The hidden states go from (batch,
+    num_key_value_heads, seqlen, head_dim) to (batch, num_attention_heads, seqlen, head_dim)
+    """
+    batch, num_key_value_heads, slen, head_dim = hidden_states.shape
+    if n_rep == 1:
+        return hidden_states
+    hidden_states = hidden_states[:, :, None, :, :].expand(batch, num_key_value_heads, n_rep, slen, head_dim)
+    return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
 
 
 def flash_attention_forward(
@@ -28,8 +36,6 @@ def flash_attention_forward(
     scaling: Optional[float] = None,
     sliding_window: Optional[int] = None,
     softcap: Optional[float] = None,
-    implementation: Optional[Literal["fa2", "lego", "fa3"]] = None,
-    skip_ulysses: bool = False,  # Skip ulysses for some ViT cases like internvl3.5
     **kwargs,
 ) -> Tuple[torch.Tensor, None]:
     if kwargs.get("output_attentions", False) or kwargs.get("head_mask", None) is not None:
@@ -53,7 +59,7 @@ def flash_attention_forward(
 
     # Ulysses patch
     ulysses_enabled = get_parallel_state().ulysses_enabled
-    if ulysses_enabled and not skip_ulysses:
+    if ulysses_enabled:
         ulysses_group = get_parallel_state().ulysses_group
         # Sanity Check & Repeat Key & Value
         ulysses_size = get_parallel_state().ulysses_size
@@ -69,12 +75,8 @@ def flash_attention_forward(
                 f"ulysses_size ({ulysses_size}) must be divisible by num_key_value_heads ({kv_head_num})"
             )
             n_repeat = ulysses_size // kv_head_num
-            # Shape before: (batch_size, seq_len, kv_head_num, head_dim)
-            # This repeats the K/V heads (dim 2) to match the ulysses_size (SP world size)
-            # Shape after: (batch_size, seq_len, kv_head_num * n_repeat, head_dim)
-            # where (kv_head_num * n_repeat) == ulysses_size
-            key = torch.repeat_interleave(key, dim=2, repeats=n_repeat)
-            value = torch.repeat_interleave(value, dim=2, repeats=n_repeat)
+            key = repeat_kv(key, n_repeat)
+            value = repeat_kv(value, n_repeat)
 
         if query.ndim == 4 and query.size(0) == 1:
             query, key, value = query.squeeze(0), key.squeeze(0), value.squeeze(0)
@@ -102,48 +104,24 @@ def flash_attention_forward(
     # Only after all_to_all we got the full seq_len
     seq_len = query.shape[1]
 
-    if is_seed_kernels_available() and implementation is not None:
-        attn_output: torch.Tensor = seed_flash_attention_forward(
-            query,
-            key,
-            value,
-            attention_mask,
-            query_length=seq_len,
-            is_causal=module.is_causal,
-            dropout=dropout,
-            position_ids=position_ids,
-            softmax_scale=scaling,
-            sliding_window=sliding_window,
-            softcap=softcap,
-            use_top_left_mask=False,
-            implementation=implementation,
-            cu_seqlens=kwargs.get("cu_seq_lens_q", None),
-            max_seqlen=kwargs.get("max_length_q", None),
-            **kwargs,
-        )
-    else:
-        assert implementation is None, (
-            f"You set {implementation=} but seed_kernels is not installed. Check --model.attn_implementation."
-        )
-        attn_output: torch.Tensor = _flash_attention_forward(
-            query,
-            key,
-            value,
-            attention_mask,
-            query_length=seq_len,
-            is_causal=module.is_causal,
-            dropout=dropout,
-            position_ids=position_ids,
-            softmax_scale=scaling,
-            sliding_window=sliding_window,
-            softcap=softcap,
-            use_top_left_mask=False,
-            implementation="flash_attention_2",
-            **kwargs,
-        )
+    attn_output: torch.Tensor = _flash_attention_forward(
+        query,
+        key,
+        value,
+        attention_mask,
+        query_length=seq_len,
+        is_causal=module.is_causal,
+        dropout=dropout,
+        position_ids=position_ids,
+        softmax_scale=scaling,
+        sliding_window=sliding_window,
+        softcap=softcap,
+        use_top_left_mask=False,
+        **kwargs,
+    )
 
     # Ulysses patch
-    if ulysses_enabled and not skip_ulysses:
+    if ulysses_enabled:
         ulysses_group = get_parallel_state().ulysses_group
         if attn_output.ndim == 4 and attn_output.size(0) == 1:
             attn_output = attn_output.squeeze(0)

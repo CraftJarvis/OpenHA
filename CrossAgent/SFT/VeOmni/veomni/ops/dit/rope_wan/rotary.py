@@ -22,8 +22,6 @@ import triton
 import triton.language as tl
 from einops import rearrange
 
-from ....utils.device import get_torch_device
-
 
 @triton.jit
 def rotary_interleaved_kernel(
@@ -171,7 +169,7 @@ def apply_rotary_interleaved(
 
     # Need this, otherwise Triton tries to launch from cuda:0 and we get
     # ValueError: Pointer argument (at 0) cannot be accessed from Triton (cpu tensor?)
-    with get_torch_device().device(x.device.index):
+    with torch.cuda.device(x.device.index):
         rotary_interleaved_kernel[grid](
             output,  # data ptrs
             x,

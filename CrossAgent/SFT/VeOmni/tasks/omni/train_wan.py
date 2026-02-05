@@ -12,7 +12,6 @@ from tqdm import trange
 from veomni.checkpoint import build_checkpointer, ckpt_to_state_dict
 from veomni.data.diffusion.data_loader import build_dit_dataloader
 from veomni.data.diffusion.dataset import build_tensor_dataset
-from veomni.distributed.clip_grad_norm import veomni_clip_grad_norm
 from veomni.distributed.offloading import build_activation_offloading_context
 from veomni.distributed.parallel_state import get_parallel_state, init_parallel_state
 from veomni.distributed.torch_parallelize import build_parallelize_model
@@ -29,12 +28,6 @@ from veomni.utils.arguments import (
     TrainingArguments,
     parse_args,
     save_args,
-)
-from veomni.utils.device import (
-    get_device_type,
-    get_dist_comm_backend,
-    get_torch_device,
-    synchronize,
 )
 from veomni.utils.dist_utils import all_reduce
 from veomni.utils.dit_utils import EnvironMeter, save_model_weights
@@ -89,8 +82,8 @@ def get_param_groups(model: torch.nn.Module, default_lr: float, vit_lr: float):
 
 def main():
     args = parse_args(Arguments)
-    get_torch_device().set_device(f"{get_device_type()}:{args.train.local_rank}")
-    dist.init_process_group(backend=get_dist_comm_backend())
+    torch.cuda.set_device(f"cuda:{args.train.local_rank}")
+    dist.init_process_group(backend="nccl")
     helper.set_seed(args.train.seed, args.train.enable_full_determinism)
     if args.train.global_rank == 0:
         save_args(args, args.train.output_dir)
@@ -188,7 +181,6 @@ def main():
     ops_to_save = convert_ops_to_objects(args.train.ops_to_save)
     model = build_parallelize_model(
         model,
-        weights_path=args.model.model_path,
         enable_full_shard=args.train.enable_full_shard,
         enable_mixed_precision=args.train.enable_mixed_precision,
         enable_gradient_checkpointing=args.train.enable_gradient_checkpointing,
@@ -218,20 +210,19 @@ def main():
                 config={**vars(args.model), **vars(args.data), **vars(args.train)},  # flatten dict
             )
 
+        if args.train.enable_profiling:
+            profiler = helper.create_profiler(
+                start_step=args.train.profile_start_step,
+                end_step=args.train.profile_end_step,
+                trace_dir=args.train.profile_trace_dir,
+                record_shapes=args.train.profile_record_shapes,
+                profile_memory=args.train.profile_profile_memory,
+                with_stack=args.train.profile_with_stack,
+            )
+            profiler.start()
+
         model_assets = [model_config]
         save_model_assets(args.train.model_assets_dir, model_assets)
-
-    if args.train.profile_this_rank:
-        profiler = helper.create_profiler(
-            start_step=args.train.profile_start_step,
-            end_step=args.train.profile_end_step,
-            trace_dir=args.train.profile_trace_dir,
-            record_shapes=args.train.profile_record_shapes,
-            profile_memory=args.train.profile_profile_memory,
-            with_stack=args.train.profile_with_stack,
-            global_rank=args.train.global_rank,
-        )
-        profiler.start()
 
     # Build diffusion scheduler: FlowMatchScheduler
     flow_scheduler = FlowMatchScheduler(
@@ -309,7 +300,7 @@ def main():
         epoch_loss = 0
         for _ in range(start_step, args.train.train_steps):
             global_step += 1
-            synchronize()
+            torch.cuda.synchronize()
             total_loss = 0
             start_time = time.time()
             try:
@@ -369,7 +360,10 @@ def main():
                 total_loss += loss.item()
                 del micro_batch
 
-            grad_norm = veomni_clip_grad_norm(model, args.train.max_grad_norm)
+            if args.train.data_parallel_mode == "fsdp1":
+                grad_norm = model.clip_grad_norm_(args.train.max_grad_norm).item()
+            else:
+                grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), args.train.max_grad_norm, foreach=True)
 
             optimizer.step()
             lr_scheduler.step()
@@ -379,7 +373,7 @@ def main():
 
             total_loss, grad_norm = all_reduce((total_loss, grad_norm), group=get_parallel_state().fsdp_group)
             epoch_loss += total_loss
-            synchronize()
+            torch.cuda.synchronize()
             delta_time = time.time() - start_time
             lr = max(lr_scheduler.get_last_lr())
             train_metrics = environ_meter.step(delta_time, global_step=global_step)
@@ -396,11 +390,10 @@ def main():
                     )
                     wandb.log(train_metrics, step=global_step)
 
-            if args.train.profile_this_rank and global_step <= args.train.profile_end_step:
-                profiler.step()
-                if global_step == args.train.profile_end_step:
-                    profiler.stop()
-
+                if args.train.enable_profiling and global_step <= args.train.profile_end_step:
+                    profiler.step()
+                    if global_step == args.train.profile_end_step:
+                        profiler.stop()
             if args.train.save_steps and global_step % args.train.save_steps == 0:
                 helper.empty_cache()
                 save_checkpoint_path = os.path.join(args.train.save_checkpoint_path, f"global_step_{global_step}")
@@ -448,7 +441,7 @@ def main():
             if args.train.global_rank == 0:
                 save_hf_weights(args, save_checkpoint_path, model_assets)
 
-    synchronize()
+    torch.cuda.synchronize()
     # release memory
     del optimizer, lr_scheduler
     helper.empty_cache()

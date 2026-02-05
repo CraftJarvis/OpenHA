@@ -11,16 +11,3 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from ...loader import MODELING_REGISTRY
-
-
-@MODELING_REGISTRY.register("qwen2")
-def register_qwen2_modeling(architecture: str):
-    from .modeling_qwen2 import Qwen2ForCausalLM, Qwen2Model
-
-    if "ForCausalLM" in architecture:
-        return Qwen2ForCausalLM
-    elif "Model" in architecture:
-        return Qwen2Model
-    else:
-        return Qwen2ForCausalLM

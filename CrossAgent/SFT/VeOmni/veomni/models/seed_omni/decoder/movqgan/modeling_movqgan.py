@@ -1,4 +1,4 @@
-# This file is based on code from https://github.com/ai-forever/MoVQGAN
+# This file is based on code from GitHub - ai-forever/MoVQGAN: MoVQGAN - model for the image encoding and reconstruction
 # Copyright 2025 Bytedance Ltd. and/or its affiliates
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -25,7 +25,7 @@ from torch.nn import CrossEntropyLoss
 from .....distributed.parallel_state import get_parallel_state
 from .....distributed.sequence_parallel import reduce_sequence_parallel_loss
 from ....seed_omni.projector import build_feature_projector, build_vit_decoder
-from ....transformers.movqgan.modeling_movqgan import MoVQGAN
+from ....transformers.movqgan import MoVQGAN
 from ..base import BaseDecoderModelMixin, BaseDecoderOutput
 from .configuration_movqgan import MoVQGANDecoderConfig
 
@@ -71,8 +71,6 @@ class MoVQGANDecoder(BaseDecoderModelMixin, MoVQGAN):
                 self.gen_aligner = build_feature_projector(config.embed_dim, config.output_size)
             self.gen_head = GenerationHead(config.output_size, config.n_embed)
         else:
-            if config.output_size is not None and config.output_size != config.n_embed:
-                raise ValueError("`output_size` should be same as `hidden_size`.")
             self.gen_aligner = nn.Identity()
             self.gen_head = nn.Identity()
 
@@ -105,16 +103,8 @@ class MoVQGANDecoder(BaseDecoderModelMixin, MoVQGAN):
         features = torch.randn((1, 3, 256, 256), dtype=self.dtype, device=self.device)
         return {"features": features}
 
-    def embed_to_indice(
-        self, hidden_states: torch.Tensor, temperature: float = 1.0, cfg: bool = False, cfg_weight: int = 5
-    ):
+    def embed_to_indice(self, hidden_states: torch.Tensor, temperature: float = 1.0):
         logits = self.gen_head(hidden_states)
-        if cfg:
-            logits_shape = logits.shape
-            logit_cond = logits[0::2, :]
-            logit_uncond = logits[1::2, :]
-            logits = logit_uncond + cfg_weight * (logit_cond - logit_uncond)
-            logits = torch.cat([logits, logits], dim=1).view(*logits_shape)
         probs = torch.softmax(logits / temperature, dim=-1)
         bs, dim = probs.shape[0], probs.shape[-1]
         probs = probs.reshape(-1, dim)
@@ -139,15 +129,15 @@ class MoVQGANDecoder(BaseDecoderModelMixin, MoVQGAN):
             logits=logits,
         )
 
-    def lm_embed(self, hidden_states: torch.Tensor, **kwargs):
-        logits, indices = self.embed_to_indice(hidden_states, **kwargs)
+    def lm_embed(self, hidden_states: torch.Tensor):
+        logits, indices = self.embed_to_indice(hidden_states)
         embeds = self.gen_aligner(self.quantize.embedding(indices))
         return embeds
 
-    def lm_generate(self, indices: torch.Tensor, **kwargs):
+    def lm_generate(self, hidden_states: torch.Tensor):
+        _, indices = self.embed_to_indice(hidden_states)
         indices = indices.reshape(-1, 32, 32)
-        bs = indices.shape[0]
-        return self.decode_code(indices, shape=[bs, 32, 32, 4])
+        return self.decode_code(indices)
 
     def forward(self, features: torch.Tensor, **kwargs):
         embeds, loss, _ = self.encode(features)

@@ -41,7 +41,18 @@ First, create new modeling file for your model implementation. Note that the cus
 
 ### 2. Register Your Model
 
-See [enable_new_models.md](enable_new_models.md#in-your-model-file) for more details.
+In your model implementation file, add a `ModelClass` variable that points to your model class:
+
+```python
+# At the end of your model file
+ModelClass = YourCustomModel
+```
+
+Or if you want to register multiple model variants:
+
+```python
+ModelClass = [YourCustomModel, YourCustomModelVariant]
+```
 
 
 ### 3. Model Configuration

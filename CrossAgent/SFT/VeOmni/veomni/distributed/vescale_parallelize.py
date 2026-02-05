@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING, List, Optional, Tuple
 import torch
 
 from ..utils import logging
-from ..utils.device import empty_cache, get_device_type
 from .parallel_state import get_parallel_state
 
 
@@ -91,9 +90,9 @@ def build_parallelize_model(
             if enable_fsdp_offload:
                 module.cpu()
                 gc.collect()
-                empty_cache()
+                torch.cuda.empty_cache()
             else:
-                model.to(get_device_type())
+                model.cuda()
             fully_shard(
                 module,
                 mesh=mesh,
@@ -118,7 +117,7 @@ def build_parallelize_model(
         offload_policy=cpu_offload_policy,
     )
     gc.collect()
-    empty_cache()
+    torch.cuda.empty_cache()
 
     # NOTE: uncomment below for saving memory fragmentation
     model._set_unshard_async_op(True)
@@ -133,7 +132,7 @@ def build_parallelize_model(
     # -) but next forward of root is already in unsharded state, so never allgather from updated sharded param, which is WRONG again!
 
     if not hasattr(mesh, "ndevice"):
-        # vescale ckpt use vescale device mesh, but here we have torch-native devicemesh, which does not have ndevice attribute
+        # bytecheckpoint vescale ckpt use vescale device mesh, but here we have torch-native devicemesh, which does not have ndevice attribute
         ndevice_func = lambda self: torch.numel(self.mesh)  # noqa: E731
         mesh.__class__.ndevice = property(ndevice_func)
 

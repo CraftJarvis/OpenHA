@@ -19,7 +19,6 @@ from typing import Callable, Optional
 import torch
 import torch.testing
 
-from ....utils.device import get_torch_device, synchronize
 from . import envvars
 from . import logger as blog
 
@@ -39,8 +38,8 @@ def _benchmark_fn(f, repeats):
         repeats = 1
         warmup_repeats = 0
 
-    start_event = [get_torch_device().Event(enable_timing=True) for _ in range(repeats)]
-    end_event = [get_torch_device().Event(enable_timing=True) for _ in range(repeats)]
+    start_event = [torch.cuda.Event(enable_timing=True) for _ in range(repeats)]
+    end_event = [torch.cuda.Event(enable_timing=True) for _ in range(repeats)]
     for _ in range(warmup_repeats):
         f()
 
@@ -52,7 +51,7 @@ def _benchmark_fn(f, repeats):
         start_event[i].record()
         f()
         end_event[i].record()
-    synchronize()
+    torch.cuda.synchronize()
 
     durations = sorted([start_event[i].elapsed_time(end_event[i]) for i in range(repeats)])
     if repeats >= 10:  # We only preserve 25% to 75% timings.

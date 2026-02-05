@@ -8,8 +8,6 @@ model:
       add_projector: false
 
 data:
-  dataloader_type: native
-  datasets_type: iterable
   train_path: sharegpt4v_pretrain
   data_type: conversation
   chat_template: qwen2vl
@@ -25,4 +23,3 @@ train:
   micro_batch_size: 2
   global_batch_size: 64
   freeze_encoder: true
-  ckpt_manager: dcp

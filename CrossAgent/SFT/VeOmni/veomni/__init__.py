@@ -11,25 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from .utils.import_utils import (
-    is_veomni_patch_available,
-)
-from .utils.logging import get_logger
 
 
-logger = get_logger(__name__)
-
-
-def _safe_apply_patches():
-    if is_veomni_patch_available():
-        from veomni_patch import apply_patch
-
-        apply_patch()
-        logger.info_rank0("✅ veomni_patch is available")
-    else:
-        logger.info_rank0("❌ veomni_patch is not available")
-
-
-_safe_apply_patches()
-
-__version__ = "v0.1.0"
+__version__ = "0.0.1"

@@ -18,7 +18,6 @@ import torch
 import triton
 import triton.language as tl
 
-from ....utils.device import get_torch_device
 from ..utils.pretuned import algo_key_scaled, pretuned
 from .triton_utils.activation import (
     ActivationType,
@@ -204,7 +203,7 @@ def group_gemm_same_nk(
     if save_activation:
         act = torch.empty_like(c)
 
-    with get_torch_device().device(a.device):
+    with torch.cuda.device(a.device):
         group_gemm_same_nk_kernel[
             lambda x: (
                 triton.cdiv(max_M, x["BLOCK_M"]) * triton.cdiv(N, x["BLOCK_N"]),
@@ -376,7 +375,7 @@ def group_gemm_same_mn(
     assert len(cumsum_K) == c.shape[0], f"{len(cumsum_K), c.shape}"
     assert a.is_contiguous() and b.is_contiguous() and c.is_contiguous(), "Not implemented: Noncontiguous input."
 
-    with get_torch_device().device(a.device):
+    with torch.cuda.device(a.device):
         group_gemm_same_mn_kernel[
             lambda x: (
                 triton.cdiv(M, x["BLOCK_M"]) * triton.cdiv(N, x["BLOCK_N"]),

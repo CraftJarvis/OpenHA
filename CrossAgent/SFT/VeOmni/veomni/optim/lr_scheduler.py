@@ -14,7 +14,7 @@
 
 
 import math
-from typing import TYPE_CHECKING, Dict, Literal
+from typing import TYPE_CHECKING, Literal
 
 from torch.optim.lr_scheduler import LambdaLR
 
@@ -28,33 +28,6 @@ if TYPE_CHECKING:
 logger = logging.get_logger(__name__)
 
 
-class MultiLRScheduler(dict):
-    """
-    Mapping of name -> LR scheduler with convenience methods to mirror a single scheduler.
-    """
-
-    _is_multi_lr_scheduler: bool = True
-
-    def step(self) -> None:
-        for sched in self.values():
-            sched.step()
-
-    def state_dict(self) -> Dict[str, any]:
-        return {name: sched.state_dict() for name, sched in self.items()}
-
-    def load_state_dict(self, state_dict: Dict[str, any]) -> None:
-        for name, sched in self.items():
-            if name in state_dict:
-                sched.load_state_dict(state_dict[name])
-
-    def get_last_lr(self):
-        # Return the first scheduler's LR for logging consistency
-        if not self:
-            return [0.0]
-        first = next(iter(self.values()))
-        return first.get_last_lr()
-
-
 def build_lr_scheduler(
     optimizer: "Optimizer",
     train_steps: int,
@@ -65,22 +38,6 @@ def build_lr_scheduler(
     lr_min: float = 1e-7,
     lr_start: float = 0.0,
 ):
-    # Handle MultiOptimizer by creating one scheduler per underlying optimizer
-    if hasattr(optimizer, "_is_multi_optimizer") or isinstance(optimizer, dict):
-        schedulers = {}
-        for key_name in optimizer.key_names:
-            schedulers[key_name] = build_lr_scheduler(
-                optimizer=optimizer.optimizers_dict[key_name],
-                train_steps=train_steps,
-                lr=lr,
-                lr_decay_style=lr_decay_style,
-                lr_decay_ratio=lr_decay_ratio,
-                lr_warmup_ratio=lr_warmup_ratio,
-                lr_min=lr_min,
-                lr_start=lr_start,
-            )
-        return MultiLRScheduler(schedulers)
-
     lr_warmup_steps = int(train_steps * lr_warmup_ratio)
     if lr_decay_style == "constant":
         return get_constant_schedule_with_warmup(

@@ -63,7 +63,7 @@ from ....distributed.sequence_parallel import (
     unpad_tensor,
 )
 from ....utils import logging
-from ....utils.import_utils import is_liger_kernel_available, is_seed_kernels_available
+from ....utils.import_utils import is_liger_kernel_available
 
 
 if is_flash_attn_2_available():
@@ -678,16 +678,15 @@ class Qwen2VLAttention(nn.Module):
         if self.config._attn_implementation != "eager":
             attention_interface = ALL_ATTENTION_FUNCTIONS[self.config._attn_implementation]
 
-        if not is_seed_kernels_available():
-            position_ids = kwargs.get("position_ids", None)
-            if position_ids is not None and position_ids.shape[-1] != 1:
-                _, (cu_seq_lens_q, cu_seq_lens_k), (max_length_q, max_length_k) = prepare_fa2_from_position_ids(
-                    position_ids[0]
-                )
-                kwargs["cu_seq_lens_k"] = cu_seq_lens_k
-                kwargs["cu_seq_lens_q"] = cu_seq_lens_q
-                kwargs["max_length_q"] = max_length_q
-                kwargs["max_length_k"] = max_length_k
+        position_ids = kwargs.get("position_ids", None)
+        if position_ids is not None:
+            _, (cu_seq_lens_q, cu_seq_lens_k), (max_length_q, max_length_k) = prepare_fa2_from_position_ids(
+                position_ids[0]
+            )
+            kwargs["cu_seq_lens_k"] = cu_seq_lens_k
+            kwargs["cu_seq_lens_q"] = cu_seq_lens_q
+            kwargs["max_length_q"] = max_length_q
+            kwargs["max_length_k"] = max_length_k
 
         attn_output, attn_weights = attention_interface(
             self,
@@ -1159,7 +1158,7 @@ class Qwen2VLModel(Qwen2VLPreTrainedModel):
         if (
             self.config._attn_implementation == "sdpa"
             and attention_mask is not None
-            and attention_mask.device.type in ["cuda", "xpu", "npu"]
+            and attention_mask.device.type in ["cuda", "xpu"]
             and not output_attentions
         ):
             # Attend to all tokens in fully masked rows in the causal_mask, for example the relevant first rows when
@@ -1977,5 +1976,8 @@ if is_liger_kernel_available():
     LayerNorm = LigerLayerNorm
     Qwen2MLP = LigerSwiGLUMLP
     logger.info_rank0("Apply liger kernel to Qwen2-VL.")
+
+
+ModelClass = Qwen2VLForConditionalGeneration
 
 __all__ = ["Qwen2VLForConditionalGeneration", "Qwen2VLModel", "Qwen2VLPreTrainedModel"]

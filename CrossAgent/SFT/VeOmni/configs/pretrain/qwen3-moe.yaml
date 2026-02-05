@@ -7,7 +7,6 @@ data:
   train_path: fineweb
   train_size: 1000000000000
   dataloader_type: native
-  datasets_type: iterable
   data_type: plaintext
   max_seq_len: 8192
   text_keys: text
@@ -39,7 +38,7 @@ train:
   init_device: cpu
   enable_full_determinism: false
   empty_cache_steps: 500
-  ckpt_manager: dcp
+  ckpt_manager: bytecheckpoint
   load_checkpoint_path: ""
   save_steps: 100
   save_hf_weights: true

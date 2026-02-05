@@ -20,7 +20,6 @@ import torch.distributed as dist
 from torch import Tensor
 from torch.distributed import ProcessGroup
 
-from ...utils.device import get_device_id
 from .comm import (
     get_ulysses_sequence_parallel_group,
     get_ulysses_sequence_parallel_world_size,
@@ -56,7 +55,7 @@ def _all_gather_into_tensor(
     group = get_ulysses_sequence_parallel_group() if group is None else group
     sp_world_size = dist.get_world_size(group)
     dim_size[0] = dim_size[0] * sp_world_size
-    output = torch.empty(dim_size, dtype=x.dtype, device=get_device_id())
+    output = torch.empty(dim_size, dtype=x.dtype, device=torch.cuda.current_device())
     dist.all_gather_into_tensor(output, x, group=group)
     return output
 

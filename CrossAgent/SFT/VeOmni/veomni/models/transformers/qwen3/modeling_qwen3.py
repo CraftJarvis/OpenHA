@@ -27,8 +27,7 @@ from ....distributed.parallel_state import get_parallel_state
 from ....distributed.sequence_parallel import slice_position_embedding
 from ....ops.loss import causallm_loss_function
 from ....utils import logging
-from ....utils.import_utils import is_liger_kernel_available
-from ...module_utils import GradientCheckpointingLayer
+from ...modeling_layers import GradientCheckpointingLayer
 
 
 if is_torch_flex_attn_available():
@@ -36,25 +35,10 @@ if is_torch_flex_attn_available():
     from transformers.integrations.flex_attention import make_flex_block_causal_mask
 
 
-if is_liger_kernel_available():
-    from liger_kernel.transformers.rms_norm import LigerRMSNorm
-    from liger_kernel.transformers.rope import liger_rotary_pos_emb
-    from liger_kernel.transformers.swiglu import LigerSwiGLUMLP
-
-
 logger = logging.get_logger(__name__)
 
 _CHECKPOINT_FOR_DOC = "Qwen/Qwen3-8B"
 _CONFIG_FOR_DOC = "Qwen3Config"
-
-
-def rms_norm(hidden_states, weight, variance_epsilon):
-    input_dtype = hidden_states.dtype
-    hidden_states = hidden_states.to(torch.float32)
-    variance = hidden_states.pow(2).mean(-1, keepdim=True)
-    hidden_states = hidden_states * torch.rsqrt(variance + variance_epsilon)
-
-    return weight * hidden_states.to(input_dtype)
 
 
 class Qwen3RMSNorm(nn.Module):
@@ -67,7 +51,11 @@ class Qwen3RMSNorm(nn.Module):
         self.variance_epsilon = eps
 
     def forward(self, hidden_states):
-        return rms_norm(hidden_states, self.weight, self.variance_epsilon)
+        input_dtype = hidden_states.dtype
+        hidden_states = hidden_states.to(torch.float32)
+        variance = hidden_states.pow(2).mean(-1, keepdim=True)
+        hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
+        return self.weight * hidden_states.to(input_dtype)
 
     def extra_repr(self):
         return f"{tuple(self.weight.shape)}, eps={self.variance_epsilon}"
@@ -749,9 +737,6 @@ class Qwen3Model(Qwen3PreTrainedModel):
         return causal_mask
 
 
-class KwargsForCausalLM(FlashAttentionKwargs): ...
-
-
 class Qwen3ForCausalLM(Qwen3PreTrainedModel, GenerationMixin):
     _tied_weights_keys = ["lm_head.weight"]
     _tp_plan = {"lm_head": "colwise_rep"}
@@ -801,7 +786,7 @@ class Qwen3ForCausalLM(Qwen3PreTrainedModel, GenerationMixin):
         output_hidden_states: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
         logits_to_keep: Union[int, torch.Tensor] = 0,
-        **kwargs: Unpack[KwargsForCausalLM],
+        **kwargs,
     ) -> CausalLMOutputWithPast:
         r"""
             labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
@@ -871,10 +856,6 @@ class Qwen3ForCausalLM(Qwen3PreTrainedModel, GenerationMixin):
         )
 
 
-if is_liger_kernel_available():
-    apply_rotary_pos_emb = liger_rotary_pos_emb
-    Qwen3RMSNorm = LigerRMSNorm
-    Qwen3MLP = LigerSwiGLUMLP
-    logger.info_rank0("Apply liger kernel to Qwen3.")
+ModelClass = Qwen3ForCausalLM
 
 __all__ = ["Qwen3ForCausalLM", "Qwen3Model", "Qwen3PreTrainedModel"]

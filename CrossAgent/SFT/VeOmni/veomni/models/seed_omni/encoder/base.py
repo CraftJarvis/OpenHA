@@ -27,9 +27,9 @@ class BaseEncoderConfigMixin(PretrainedConfig, ABC):
 
 
 class BaseEncoderProcessorMixin(ProcessorMixin, ABC):
-    valid_kwargs = ["token_size", "token_num"]
+    # TODO: Fix: Some kwargs in processor config are unused and will not have any effect
     attributes = []
-    optional_attributes = ["chat_template", "audio_tokenizer"]
+    optional_attributes = ["chat_template"]
 
     def __init__(self, token_size=None, token_num=None, **kwargs):
         """ """

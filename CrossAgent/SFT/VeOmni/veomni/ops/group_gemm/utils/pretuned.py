@@ -15,7 +15,6 @@
 import triton
 
 from ....utils import logging
-from ....utils.device import get_device_name
 from . import envvars
 from .config import load_all_configs_for
 from .kernel import innermost_fn, qualified_name
@@ -99,10 +98,12 @@ def pretuned(*, algo_key=None, fallback=None):
             # as `fallback` provided to `pretuned`. The latter is used when we're running on an untuned
             # device, while the former is just a catch-all for a specific device.
             if not envvars.is_untuned_warning_suppressed():
+                import torch
+
                 logger.debug(
                     f"No pre-tuned hyperparameter for kernel [{name}], using fallback config, "
                     "performance may suffer. You may have triton version or device name mismatch. "
-                    f"You have triton=={triton.__version__} and device name [{get_device_name()}]",
+                    f"You have triton=={triton.__version__} and device name [{torch.cuda.get_device_name()}]",
                 )
             configs.update({CATCH_ALL_ALGO_KEY: fallback})
 

@@ -8,7 +8,7 @@ from ..data.constants import IGNORE_INDEX
 from ..distributed.parallel_state import get_parallel_state
 from ..distributed.sequence_parallel import reduce_sequence_parallel_loss
 from ..utils import logging
-from ..utils.import_utils import is_liger_kernel_available, is_seed_kernels_available
+from ..utils.import_utils import is_liger_kernel_available
 
 
 logger = logging.get_logger(__name__)
@@ -33,11 +33,7 @@ def fixed_cross_entropy(
 
 fused_linear_cross_entropy = None
 
-if is_seed_kernels_available():
-    from seed_kernels.transformers.functional import seed_fused_linear_cross_entropy
-
-    fused_linear_cross_entropy = seed_fused_linear_cross_entropy
-elif is_liger_kernel_available():
+if is_liger_kernel_available():
     from liger_kernel.transformers import LigerFusedLinearCrossEntropyLoss  # type: ignore
 
     fused_linear_cross_entropy = LigerFusedLinearCrossEntropyLoss(reduction="mean")
@@ -75,11 +71,8 @@ def causallm_loss_function(
     hidden_states = hidden_states.view(-1, hidden_states.size(-1))
 
     # Calculate loss
-    if fused_linear_cross_entropy is not None:  # use kernels
-        if is_seed_kernels_available():
-            loss = fused_linear_cross_entropy(hidden_states, weight, labels, ignore_index=ignore_index)
-        elif is_liger_kernel_available():
-            loss = fused_linear_cross_entropy(weight, hidden_states, labels)
+    if fused_linear_cross_entropy is not None:  # use liger kernels
+        loss = fused_linear_cross_entropy(weight, hidden_states, labels)
     else:
         logits = F.linear(hidden_states, weight).float()
         loss = fixed_cross_entropy(logits, labels, num_items_in_batch, ignore_index, **kwargs)

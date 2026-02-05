@@ -13,17 +13,13 @@
 # limitations under the License.
 
 
-from .checkpointer import (
-    CHECKPOINT_TO_STATE_DICT_REGISTRY,
-    CHECKPOINTER_REGISTRY,
-    build_checkpointer,
-    ckpt_to_state_dict,
-)
+from .checkpointer import build_checkpointer
+from .format_utils import bytecheckpoint_ckpt_to_state_dict, ckpt_to_state_dict, dcp_to_torch_state_dict
 
 
 __all__ = [
     "ckpt_to_state_dict",
+    "dcp_to_torch_state_dict",
+    "bytecheckpoint_ckpt_to_state_dict",
     "build_checkpointer",
-    "CHECKPOINTER_REGISTRY",
-    "CHECKPOINT_TO_STATE_DICT_REGISTRY",
 ]

@@ -7,7 +7,6 @@ data:
   train_path: Wanmini480
   train_size: 1000000000000
   dataloader_type: native
-  datasets_type: iterable
   data_type: diffusion
   max_seq_len: 8192
   text_keys: text
@@ -27,7 +26,6 @@ train:
   dyn_bsz_margin: 0
   dyn_bsz_buffer_size: 200
   optimizer: adamw
-  vit_lr: 5.0e-5
   lr: 1.0e-4
   lr_warmup_ratio: 0.007
   lr_decay_style: constant
@@ -42,7 +40,7 @@ train:
   init_device: cuda
   enable_full_determinism: false
   empty_cache_steps: 500
-  ckpt_manager: dcp
+  ckpt_manager: bytecheckpoint
   load_checkpoint_path: ""
   max_steps: 500
   save_epochs: 20

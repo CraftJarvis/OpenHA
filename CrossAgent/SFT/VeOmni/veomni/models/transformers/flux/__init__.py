@@ -12,18 +12,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from ...loader import MODEL_CONFIG_REGISTRY, MODELING_REGISTRY
+
+from transformers import AutoConfig
+
+from .config_flux import FluxConfig
+from .modeling_flux import FluxModel
 
 
-@MODEL_CONFIG_REGISTRY.register("flux")
-def register_flux_config():
-    from .config_flux import FluxConfig
+AutoConfig.register("flux", FluxConfig)
 
-    return FluxConfig
-
-
-@MODELING_REGISTRY.register("flux")
-def register_flux_modeling(architecture: str):
-    from .modeling_flux import FluxModel
-
-    return FluxModel
+__all__ = ["FluxModel", "FluxConfig"]

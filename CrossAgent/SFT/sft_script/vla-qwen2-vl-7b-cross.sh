@@ -99,7 +99,7 @@ torchrun --nnodes="$NNODES" --nproc-per-node "$NPROC_PER_NODE" --node-rank "$NOD
   VeOmni/configs/multimodal/qwen2_vl/qwen2_vl.yaml \
   --model.model_path "$base_model_path" \
   --data.train_path "$dataset_paths" \
-  --data.chat_template qwen2_5vlwithfocal_onlylaststep \
+  --data.chat_template qwen2_5vlwithfocal \
   --data.train_size 100000000000000000000 \
   --train.max_steps $max_steps \
   --data.max_seq_len $max_seq_length \

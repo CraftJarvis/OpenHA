@@ -686,7 +686,7 @@ class LlamaModel(LlamaPreTrainedModel):
         if (
             self.config._attn_implementation == "sdpa"
             and attention_mask is not None
-            and attention_mask.device.type in ["cuda", "xpu", "npu"]
+            and attention_mask.device.type in ["cuda", "xpu"]
             and not output_attentions
         ):
             # Attend to all tokens in fully masked rows in the causal_mask, for example the relevant first rows when
@@ -756,9 +756,6 @@ class LlamaModel(LlamaPreTrainedModel):
         return causal_mask
 
 
-class KwargsForCausalLM(FlashAttentionKwargs): ...
-
-
 class LlamaForCausalLM(LlamaPreTrainedModel, GenerationMixin):
     _tied_weights_keys = ["lm_head.weight"]
     _tp_plan = {"lm_head": "colwise_rep"}
@@ -807,7 +804,7 @@ class LlamaForCausalLM(LlamaPreTrainedModel, GenerationMixin):
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
         logits_to_keep: Union[int, torch.Tensor] = 0,
-        **kwargs: Unpack[KwargsForCausalLM],
+        **kwargs,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         r"""
         Args:
@@ -889,4 +886,7 @@ if is_liger_kernel_available():
     LlamaMLP = LigerSwiGLUMLP
     logger.info_rank0("Apply liger kernel to Llama.")
 
-__all__ = ["LlamaForCausalLM", "LlamaModel"]
+
+ModelClass = LlamaForCausalLM
+
+__all__ = ["LlamaForCausalLM", "LlamaModel", "LlamaPreTrainedModel"]

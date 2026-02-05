@@ -11,7 +11,6 @@ from transformers import Qwen2Config
 from veomni.distributed.parallel_state import init_parallel_state
 from veomni.utils import helper
 from veomni.utils.arguments import DataArguments, ModelArguments, TrainingArguments, parse_args
-from veomni.utils.device import get_device_type, get_dist_comm_backend, get_torch_device
 
 
 logger = helper.create_logger(__name__)
@@ -36,8 +35,8 @@ torchrun --nnodes=1 --nproc-per-node=8 --master-port=4321 tests/utils/test_helpe
 def run_environ_meter(args):
     world_size = int(os.environ["WORLD_SIZE"])
     rank = int(os.environ["RANK"])
-    get_torch_device().set_device(f"{get_device_type()}:{args.train.local_rank}")
-    dist.init_process_group(backend=get_dist_comm_backend(), world_size=world_size, rank=rank)
+    torch.cuda.set_device(f"cuda:{args.train.local_rank}")
+    dist.init_process_group(backend="nccl", world_size=world_size, rank=rank)
 
     config = Qwen2Config()
     init_parallel_state(

@@ -20,8 +20,6 @@ from typing import TYPE_CHECKING, Any, Callable, List, Literal, Optional, Union
 import torch
 from torch import distributed as dist
 
-from ..utils.device import get_device_type
-
 
 if TYPE_CHECKING:
     from torch.distributed import ProcessGroup
@@ -31,31 +29,23 @@ def all_gather(tensor: "torch.Tensor", world_size: int) -> "torch.Tensor":
     """
     Gathers the tensor from all ranks and concats them along the first dim.
     """
-    output_tensor = torch.empty(world_size * tensor.numel(), dtype=tensor.dtype, device=get_device_type())
+    output_tensor = torch.empty(world_size * tensor.numel(), dtype=tensor.dtype, device="cuda")
     dist.all_gather_into_tensor(output_tensor, tensor)
     return output_tensor.view(-1, *tensor.size()[1:])
 
 
 def all_reduce(
     data: Union[int, float, List[Union[int, float]], "torch.Tensor"],
-    op: Literal["mean", "sum", "max", "min"] = "mean",
+    op: Literal["mean", "sum", "max"] = "mean",
     group: Optional["ProcessGroup"] = None,
 ) -> Union[int, float, List[Union[int, float]]]:
     """
     Performs all reduce in the given process group.
     """
-    if not dist.is_initialized():
-        raise RuntimeError("Distributed environment is not initialized.")
-
     if not isinstance(data, torch.Tensor):
-        data = torch.tensor(data, dtype=torch.float, device=get_device_type())
+        data = torch.tensor(data, dtype=torch.float, device="cuda")
 
-    reduce_ops = {
-        "mean": dist.ReduceOp.SUM,
-        "sum": dist.ReduceOp.SUM,
-        "max": dist.ReduceOp.MAX,
-        "min": dist.ReduceOp.MIN,
-    }
+    reduce_ops = {"mean": dist.ReduceOp.SUM, "sum": dist.ReduceOp.SUM, "max": dist.ReduceOp.MAX}
     dist.all_reduce(data, op=reduce_ops[op], group=group)
     if op == "mean":  # ReduceOp.AVG is not supported by the NPU backend
         data /= dist.get_world_size(group=group)

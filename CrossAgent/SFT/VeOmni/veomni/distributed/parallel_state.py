@@ -18,15 +18,14 @@
 import math
 import os
 from dataclasses import dataclass
-from functools import cached_property, wraps
+from functools import wraps
 from typing import TYPE_CHECKING, Callable, Literal, Optional
 
 import torch
 from torch import distributed as dist
 
 from ..utils import logging
-from ..utils.device import get_device_type
-from ..utils.import_utils import is_torch_version_greater_than
+from ..utils.import_utils import is_torch_npu_available, is_torch_version_greater_than
 
 
 if is_torch_version_greater_than("2.4"):
@@ -86,7 +85,7 @@ class ParallelState:
     cp_size: int = 1
     ulysses_size: int = 1
     dp_mode: Literal["ddp", "fsdp1", "fsdp2"] = "fsdp1"
-    device_type: str = get_device_type()
+    device_type: str = "npu" if is_torch_npu_available() else "cuda"
     include_sp_in_fsdp: bool = True
     device_mesh: Optional["DeviceMesh"] = None
     ep_fsdp_device_mesh: Optional["DeviceMesh"] = None
@@ -326,7 +325,7 @@ class ParallelState:
     def ep_fsdp_mesh(self) -> "DeviceMesh":
         return self.ep_fsdp_device_mesh["ep", "ep_fsdp"]
 
-    @cached_property
+    @property
     @requires_mesh
     def ep_group(self) -> "ProcessGroup":
         return self.ep_mesh.get_group()
@@ -338,22 +337,6 @@ class ParallelState:
     @property
     def ep_rank(self) -> int:
         return self.ep_fsdp_device_mesh.get_local_rank("ep")
-
-    @property
-    def ep_fsdp_size(self) -> int:
-        assert self.ep_enabled, "ep_fsdp_size is only available when ep is enabled (ep_size > 1)"
-        return self.fsdp_size // self.ep_size
-
-    @property
-    def ep_gradient_divide_factor(self) -> int:
-        # We assume the world size is the total dp size by now
-        # TP and PP would make this assumption not true
-        assert self.tp_size == 1
-        assert self.pp_size == 1
-        # For ep+fsdp2, the grad divide factor should alwasy be world size (no matter HSDP or not)
-        # SP does not affect this since SP groups still replicate params
-        # and their grads are all-reduced which would match grads for the same data without SP.
-        return self.world_size
 
     # ------------------------------ SP ------------------------------ #
     @property
@@ -468,14 +451,14 @@ def init_parallel_state(
         return
 
     if device_type is None:
-        device_type = get_device_type()
+        device_type = "npu" if is_torch_npu_available() else "cuda"
 
     # Set dp_shard_size to dp_size if dp_shard_size and dp_replicate_size are not set when dp enabled
     if dp_size > 1 and dp_shard_size == 1 and dp_replicate_size == 1:
         dp_shard_size = dp_size
 
     logger.info_rank0(
-        f"Initializing parallel state... dp_size {dp_size}, dp_replicate_size {dp_replicate_size}, dp_shard_size {dp_shard_size},tp_size {tp_size}, pp_size {pp_size}, ep_size {ep_size}, cp_size {cp_size}, ulysses_size {ulysses_size}"
+        f"Initializing parallel state... dp_size {dp_size}, dp_replicate_size {dp_replicate_size}, dp_shard_size {dp_shard_size},tp_size {tp_size}, pp_size {pp_size}, cp_size {cp_size}, ulysses_size {ulysses_size}"
     )
 
     device_mesh, ep_fsdp_device_mesh = None, None

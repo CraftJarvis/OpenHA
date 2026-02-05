@@ -26,9 +26,6 @@ from safetensors.torch import load_file
 from torch.distributed._tensor import Replicate, Shard
 
 from ...utils import logging
-from ...utils.device import get_device_id
-from ...utils.fs import copy_to_local
-from ...utils.helper import CACHE_DIR
 from ..parallel_plan import SpecInfo
 
 
@@ -40,8 +37,6 @@ def parallel_load_safetensors(
 ):
     assert not (specific_param_name is not None and ignore_param_name is not None)
 
-    # download the model from hdfs to cache dir if needed
-    filepath = copy_to_local(src=filepath, cache_dir=f"{CACHE_DIR}/models", verbose=True)
     dist.barrier()
 
     safetensors2param = {}
@@ -72,7 +67,7 @@ def parallel_load_safetensors(
     ckpt_chunks = [ckpt_chunks[i * size : (i + 1) * size] for i in range(world_size)]
 
     shard_states = {}
-    device = get_device_id()
+    device = torch.cuda.current_device()
     for rank, files in enumerate(ckpt_chunks):
         if rank == dist.get_rank():
             for file in files:
@@ -92,8 +87,8 @@ def parallel_init_fsdp_fn(
     module: torch.nn.Module,
     shard_states: Dict[str, torch.nn.Parameter],
     remove_standalone: bool = True,
-    ignore_states: list[torch.nn.Module] = None,
-    strict: bool = False,
+    specific_param_name: list[str] = None,
+    ignore_param_name: list[str] = None,
 ):
     """
     Initialize a module with sharded states in a parallel fashion using Fully Sharded Data Parallel (FSDP).
@@ -102,25 +97,26 @@ def parallel_init_fsdp_fn(
         module (torch.nn.Module): The module to be initialized.
         shard_states (Dict[str, torch.nn.Parameter]): A dictionary containing sharded states.
         remove_standalone (bool, optional): If True, only consider shared states. Defaults to True.
+        specific_param_name (list[str], optional): A list of specific parameter names to consider. Defaults to None.
+        ignore_param_name (list[str], optional): A list of parameter names to ignore. Defaults to None.
 
     Returns:
         Callable[[torch.nn.Module], torch.nn.Module]: A function that initializes sub-modules of the given module.
     """
+    assert not (specific_param_name is not None and ignore_param_name is not None)
     state2fqn = {}
     for name, state in itertools.chain(
         module.named_parameters(remove_duplicate=False), module.named_buffers(remove_duplicate=False)
     ):
+        if specific_param_name is not None:
+            if name not in specific_param_name:
+                continue
+        elif ignore_param_name is not None:
+            if name in ignore_param_name:
+                continue
         state2fqn.setdefault(state, []).append(name)
 
     shared = {s for s, names in state2fqn.items() if len(names) > 1} if remove_standalone else set(state2fqn.keys())
-
-    ignore_modules = set()
-    if ignore_states:
-        # TODO: Support parameters
-        for state in ignore_states:
-            assert isinstance(state, torch.nn.Module)
-            ignore_modules.add(state)
-            ignore_modules.update(state.modules())
 
     materialized_states = {}
 
@@ -135,7 +131,7 @@ def parallel_init_fsdp_fn(
         Returns:
             torch.Tensor: The full tensor.
         """
-        device = get_device_id()
+        device = torch.cuda.current_device()
         if isinstance(spec_info.placement, Replicate):
             return torch.empty_like(param.data, device=device)
         else:
@@ -163,52 +159,6 @@ def parallel_init_fsdp_fn(
             param.data.copy_(local_data.contiguous())
         param.spec_info = spec_info
 
-    def _is_large_shard_param(param, state, size_gb=20):
-        numel = param.numel()
-        element_size = param.element_size()
-        param_size = element_size * numel
-        if hasattr(state, "spec_info") and isinstance(state.spec_info.placement, Shard):
-            param_size *= state.spec_info.ep_mesh.size()
-            return param_size >= size_gb * (1024**3)
-        else:
-            return False
-
-    def chunk_and_broadcast_data(param, full_data, spec_info):
-        device = param.device
-        placement = spec_info.placement
-        ep_size = spec_info.ep_mesh.size()
-        global_size = list(param.data.size())
-
-        global_size[placement.dim] *= ep_size
-        global_size = torch.Size(global_size)
-        loaded_size = full_data.size()
-        pad_size = tuple((0, module_dim - load_dim) for module_dim, load_dim in zip(global_size, loaded_size))
-        pad_size = tuple(itertools.chain(*(pad_size[::-1])))
-        full_data = torch.nn.functional.pad(full_data, pad_size)
-        chunk_loaded_data = list(
-            full_data.chunk(
-                ep_size,
-                dim=placement.dim,
-            )
-        )
-        broadcast_buffer = torch.empty_like(param.data, device=device)
-        for chunk_id in range(ep_size):
-            broadcast_buffer.copy_(chunk_loaded_data[chunk_id].contiguous())
-            dist.broadcast(broadcast_buffer, src=dist.get_rank())
-        param.data.copy_(chunk_loaded_data[spec_info.ep_mesh.get_local_rank()].contiguous())
-        param.spec_info = spec_info
-        del broadcast_buffer
-
-    def receive_broadcasted_chunk_data(param, broadcast_src, spec_info):
-        device = param.device
-        chunk_received_data = torch.empty_like(param.data, device=device)
-        for chunk_id in range(spec_info.ep_mesh.size()):
-            dist.broadcast(chunk_received_data, src=broadcast_src)
-            if chunk_id == spec_info.ep_mesh.get_local_rank():
-                param.data.copy_(chunk_received_data)
-        param.spec_info = spec_info
-        del chunk_received_data
-
     @torch.no_grad()
     def create_and_sync_state(param_name, state, is_param):
         """
@@ -222,16 +172,14 @@ def parallel_init_fsdp_fn(
         Returns:
             torch.Tensor: The synchronized state tensor.
         """
-        device = get_device_id()
+        device = torch.cuda.current_device()
         if is_param:
             param = torch.nn.Parameter(torch.empty_like(state.data, device=device), requires_grad=state.requires_grad)
         else:  # buffer
             param = torch.empty_like(state.data, device=device)
         if param_name not in shard_states:
+            logger.warn(f"{param_name} not found in shard states, init it from random")
             assert is_param
-            if strict:
-                raise RuntimeError(f"Missing key(s) in state_dict: {param_name}")
-            logger.warning_rank0(f"{param_name} not found in shard states, init it from random")
             if dist.get_rank() == 0:
                 initializer_range = (2.5 * max(state.shape)) ** -0.5
                 size = list(state.size())
@@ -246,29 +194,21 @@ def parallel_init_fsdp_fn(
             else:
                 shard_states[param_name] = 0
         loaded = shard_states[param_name]
-
         if isinstance(loaded, (torch.nn.Parameter, torch.Tensor)):
-            if not _is_large_shard_param(param, state):
-                full_data = loaded.data.to(dtype=param.dtype, device=param.device, non_blocking=True)
-                dist.broadcast(full_data, src=dist.get_rank())
-                if hasattr(state, "spec_info"):
-                    copy_to_local(param, loaded.data, state.spec_info)
-                else:
-                    param.data.copy_(loaded.data)
+            loaded = loaded.to(dtype=param.dtype, device=device)
+            dist.broadcast(loaded.data.to(param.dtype), src=dist.get_rank())
+            if hasattr(state, "spec_info"):
+                copy_to_local(param, loaded.data, state.spec_info)
             else:
-                chunk_and_broadcast_data(param, loaded, state.spec_info)
+                param.data.copy_(loaded.data)
         else:
             assert isinstance(loaded, int)  # the rank that holds the state
             if hasattr(state, "spec_info"):
-                if not _is_large_shard_param(param, state):
-                    full_data = make_full_tensor(param, state.spec_info)
-                    dist.broadcast(full_data, src=loaded)
-                    copy_to_local(param, full_data, state.spec_info)
-                else:
-                    receive_broadcasted_chunk_data(param, loaded, state.spec_info)
+                full_data = make_full_tensor(param, state.spec_info)
+                dist.broadcast(full_data, src=loaded)
+                copy_to_local(param, full_data, state.spec_info)
             else:
                 dist.broadcast(param.data, src=loaded)
-
         shard_states.pop(param_name)
         del loaded
         return param
@@ -283,14 +223,13 @@ def parallel_init_fsdp_fn(
         Returns:
             torch.nn.Module: The initialized sub-module.
         """
-        if sub_mod in ignore_modules:
-            logger.warning_once(f"ignore module: {sub_mod.__class__.__name__}")
-            return sub_mod
-
         param_and_buffers = tuple(sub_mod.named_parameters(recurse=False)) + tuple(
             sub_mod.named_buffers(recurse=False)
         )
         for name, state in param_and_buffers:
+            if state not in state2fqn:
+                logger.warning_once(f"{name} in {sub_mod.__class__.__name__} not found in state2fqn, skip it")
+                continue
             is_param = name in sub_mod._parameters
             fqn = state2fqn[state].pop(0)
             if (not is_param) and fqn not in shard_states:

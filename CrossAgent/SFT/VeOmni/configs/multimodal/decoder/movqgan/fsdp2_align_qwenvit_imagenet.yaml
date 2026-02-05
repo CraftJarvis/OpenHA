@@ -7,8 +7,6 @@ model:
     use_semantic_decoder: true
 
 data:
-  dataloader_type: native
-  datasets_type: iterable
   train_path: imagenet1k_train
 
 train:
@@ -21,4 +19,3 @@ train:
   micro_batch_size: 8
   global_batch_size: 128
   enable_gradient_checkpointing: False
-  ckpt_manager: dcp

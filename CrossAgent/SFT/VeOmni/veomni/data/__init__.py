@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+
 from .chat_template import build_chat_template
 from .data_collator import (
     CollatePipeline,
@@ -23,30 +24,10 @@ from .data_collator import (
     UnpackDataCollator,
 )
 from .data_loader import build_dataloader
-from .dataset import build_dataset
-from .dummy_dataset import build_dummy_dataset
+from .dataset import build_iterative_dataset, build_mapping_dataset
 from .multimodal.data_collator import (
     OmniDataCollatorWithPacking,
     OmniDataCollatorWithPadding,
     OmniSequenceShardCollator,
 )
 from .multimodal.multimodal_chat_template import build_multimodal_chat_template
-
-
-__all__ = [
-    "build_chat_template",
-    "build_dataloader",
-    "build_dummy_dataset",
-    "build_multimodal_chat_template",
-    "CollatePipeline",
-    "DataCollatorWithPacking",
-    "DataCollatorWithPadding",
-    "DataCollatorWithPositionIDs",
-    "MakeMicroBatchCollator",
-    "TextSequenceShardCollator",
-    "UnpackDataCollator",
-    "OmniDataCollatorWithPacking",
-    "OmniDataCollatorWithPadding",
-    "OmniSequenceShardCollator",
-    "build_dataset",
-]

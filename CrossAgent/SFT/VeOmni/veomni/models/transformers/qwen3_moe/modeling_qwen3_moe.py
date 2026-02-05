@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from dataclasses import dataclass
 from typing import Callable, List, Optional, Tuple, Union
 
 import torch
@@ -182,7 +183,6 @@ class Qwen3MoeExperts(nn.Module):
 
     def forward(self, hidden_states, expert_idx=None, routing_weights=None, selected_experts=None):
         if expert_idx is not None:
-            assert not get_parallel_state().ep_enabled, "_moe_implementation=`eager` does not support EP"
             gate_proj_out = torch.matmul(hidden_states, self.gate_proj[expert_idx].transpose(0, 1))
             up_proj_out = torch.matmul(hidden_states, self.up_proj[expert_idx].transpose(0, 1))
 
@@ -276,6 +276,14 @@ def eager_attention_forward(
     attn_output = attn_output.transpose(1, 2).contiguous()
 
     return attn_output, attn_weights
+
+
+@dataclass
+class ModelingFlashAttnExtraConfig:
+    cu_seq_lens_k: torch.Tensor = None
+    cu_seq_lens_q: torch.Tensor = None
+    max_length_q: int = 0
+    max_length_k: int = 0
 
 
 class Qwen3MoeAttention(nn.Module):
@@ -436,7 +444,7 @@ class Qwen3MoeSparseFusedMoeBlock(nn.Module):
         final_hidden_states = self.experts(
             hidden_states, routing_weights=routing_weights, selected_experts=selected_experts
         )
-        final_hidden_states = final_hidden_states.reshape(batch_size, sequence_length, hidden_dim)
+
         return final_hidden_states, router_logits
 
 
@@ -477,6 +485,7 @@ class Qwen3MoeDecoderLayer(nn.Module):
         use_cache: Optional[bool] = False,
         cache_position: Optional[torch.LongTensor] = None,
         position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # necessary, but kept here for BC
+        modelingFlashAttnExtraConfig: Optional[ModelingFlashAttnExtraConfig] = None,
         **kwargs: Unpack[FlashAttentionKwargs],
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
         """
@@ -507,6 +516,12 @@ class Qwen3MoeDecoderLayer(nn.Module):
         residual = hidden_states
 
         hidden_states = self.input_layernorm(hidden_states)
+
+        if modelingFlashAttnExtraConfig is not None:
+            kwargs["cu_seq_lens_q"] = modelingFlashAttnExtraConfig.cu_seq_lens_q
+            kwargs["cu_seq_lens_k"] = modelingFlashAttnExtraConfig.cu_seq_lens_k
+            kwargs["max_length_q"] = modelingFlashAttnExtraConfig.max_length_q
+            kwargs["max_length_k"] = modelingFlashAttnExtraConfig.max_length_k
 
         # Self Attention
         hidden_states, self_attn_weights = self.self_attn(
@@ -707,6 +722,26 @@ class Qwen3MoeModel(Qwen3MoePreTrainedModel):
     def set_input_embeddings(self, value):
         self.embed_tokens = value
 
+    def prepare_fa2_from_position_ids(self, position_ids):
+        position_ids = position_ids.flatten()
+        indices_q = torch.arange(position_ids.size(0), device=position_ids.device, dtype=torch.int32)
+
+        cu_seq_lens = torch.cat(
+            (
+                indices_q[position_ids == 0],
+                torch.tensor(position_ids.size(), device=position_ids.device, dtype=torch.int32),
+            )
+        )
+
+        # max_length在不同的model里面type不同
+        # modeling_qwen3_moe_foundation/modeling_qwen2_5_omni里为tensor
+        # modeling_qwen2_vl的为int
+        # 此处采用有.item()的写法，在decoder layers之前拿到int type的max_length
+        # 否则在decoder里面仍然每一层都会触发.item()
+        max_length = cu_seq_lens.diff().max().item()
+
+        return (indices_q, (cu_seq_lens, cu_seq_lens), (max_length, max_length))
+
     @add_start_docstrings_to_model_forward(QWEN3_MOE_INPUTS_DOCSTRING)
     def forward(
         self,
@@ -721,7 +756,7 @@ class Qwen3MoeModel(Qwen3MoePreTrainedModel):
         output_router_logits: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
-        **kwargs: Unpack[FlashAttentionKwargs],
+        **flash_attn_kwargs: Unpack[FlashAttentionKwargs],
     ) -> Union[Tuple, BaseModelOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_router_logits = (
@@ -776,6 +811,20 @@ class Qwen3MoeModel(Qwen3MoePreTrainedModel):
         all_self_attns = () if output_attentions else None
         all_router_logits = () if output_router_logits else None
 
+        modelingFlashAttnExtraConfig = ModelingFlashAttnExtraConfig()
+        if position_ids is not None:
+            # for bsh cases, cache_position.unsqueeze(0) will create a tensor of shape [1,max_seq_len]
+            # we expand it to make it match the batch size otherwise the calculated cu_seq_len and max_length might be wrong
+            if position_ids.shape[0] != input_ids.shape[0]:
+                position_ids = position_ids.expand(input_ids.shape[0], -1)
+            _, (cu_seq_lens_q, cu_seq_lens_k), (max_length_q, max_length_k) = self.prepare_fa2_from_position_ids(
+                position_ids
+            )
+            modelingFlashAttnExtraConfig.cu_seq_lens_q = cu_seq_lens_q
+            modelingFlashAttnExtraConfig.cu_seq_lens_k = cu_seq_lens_k
+            modelingFlashAttnExtraConfig.max_length_k = max_length_k
+            modelingFlashAttnExtraConfig.max_length_q = max_length_q
+
         for decoder_layer in self.layers:
             if output_hidden_states:
                 all_hidden_states += (hidden_states,)
@@ -792,7 +841,7 @@ class Qwen3MoeModel(Qwen3MoePreTrainedModel):
                     use_cache,
                     cache_position,
                     position_embeddings,
-                    **kwargs,
+                    modelingFlashAttnExtraConfig,
                 )
             else:
                 layer_outputs = decoder_layer(
@@ -805,7 +854,8 @@ class Qwen3MoeModel(Qwen3MoePreTrainedModel):
                     use_cache=use_cache,
                     cache_position=cache_position,
                     position_embeddings=position_embeddings,
-                    **kwargs,
+                    modelingFlashAttnExtraConfig=modelingFlashAttnExtraConfig,
+                    **flash_attn_kwargs,
                 )
 
             hidden_states = layer_outputs[0]
@@ -904,7 +954,7 @@ class Qwen3MoeModel(Qwen3MoePreTrainedModel):
         if (
             self.config._attn_implementation == "sdpa"
             and attention_mask is not None
-            and attention_mask.device.type in ["cuda", "xpu", "npu"]
+            and attention_mask.device.type in ["cuda", "xpu"]
             and not output_attentions
         ):
             # Attend to all tokens in fully masked rows in the causal_mask, for example the relevant first rows when
@@ -982,9 +1032,6 @@ class Qwen3MoeModel(Qwen3MoePreTrainedModel):
                     padding_mask, min_dtype
                 )
         return causal_mask
-
-
-class KwargsForCausalLM(FlashAttentionKwargs): ...
 
 
 def load_balancing_loss_func(
@@ -1123,7 +1170,7 @@ class Qwen3MoeForCausalLM(Qwen3MoePreTrainedModel, GenerationMixin):
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
         logits_to_keep: Union[int, torch.Tensor] = 0,
-        **kwargs: Unpack[KwargsForCausalLM],
+        **kwargs,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         r"""
         Args:
@@ -1506,6 +1553,9 @@ if is_liger_kernel_available():
     apply_rotary_pos_emb = liger_rotary_pos_emb
     Qwen3MoeRMSNorm = LigerRMSNorm
     logger.info_rank0("Apply liger kernel to Qwen3_moe.")
+
+ModelClass = Qwen3MoeForCausalLM
+
 
 __all__ = [
     "Qwen3MoeForCausalLM",

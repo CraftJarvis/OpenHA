@@ -104,7 +104,7 @@ def check_fqn_match(fqn_pattern: str, fqn: str, prefix: str = None):
     if prefix:
         fqn_pattern = [".".join([prefix, pattern]) for pattern in fqn_pattern]
 
-    regex_str = re.escape(fqn_pattern).replace(r"\*", r".*")
+    regex_str = re.escape(fqn_pattern).replace(r"\*", r"(\d+)")
     regex_str = f"^{regex_str}$"
     regex = re.compile(regex_str)
 

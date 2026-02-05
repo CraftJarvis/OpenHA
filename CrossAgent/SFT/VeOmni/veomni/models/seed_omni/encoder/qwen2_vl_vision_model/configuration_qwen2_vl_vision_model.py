@@ -23,9 +23,7 @@ class Qwen2VLVisionModelConfig(BaseEncoderConfigMixin, Qwen2VLVisionConfig):
     def __init__(
         self,
         return_hidden_states=False,
-        train_origin_projector=False,
         **kwargs,
     ):
         self.return_hidden_states = return_hidden_states
-        self.train_origin_projector = train_origin_projector
         super().__init__(**kwargs)

@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 
-from .device import synchronize
 from .helper import EnvironMeter as OriginalEnvironMeter
 
 
@@ -203,7 +202,7 @@ def save_model_weights(
 
             empty_cache()
             if global_rank is not None and dist.is_initialized():  # avoid process hanging
-                synchronize()
+                torch.cuda.synchronize()
                 dist.barrier()
 
         if global_rank is None or global_rank == 0:

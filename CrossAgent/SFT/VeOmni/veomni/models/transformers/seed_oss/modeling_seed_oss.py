@@ -24,6 +24,7 @@ from transformers.modeling_layers import (
     GenericForQuestionAnswering,
     GenericForSequenceClassification,
     GenericForTokenClassification,
+    GradientCheckpointingLayer,
 )
 from transformers.modeling_outputs import (
     BaseModelOutputWithPast,
@@ -42,7 +43,6 @@ from ....distributed.sequence_parallel import slice_position_embedding
 from ....ops.loss import causallm_loss_function
 from ....utils import logging
 from ....utils.import_utils import is_liger_kernel_available
-from ...module_utils import GradientCheckpointingLayer
 
 
 if is_liger_kernel_available():
@@ -360,7 +360,7 @@ class SeedOssModel(SeedOssPreTrainedModel):
         # Initialize weights and apply final processing
         self.post_init()
 
-    @check_model_inputs()
+    @check_model_inputs
     @auto_docstring
     def forward(
         self,
@@ -530,6 +530,9 @@ if is_liger_kernel_available():
     SeedOssRMSNorm = LigerRMSNorm
     SeedOssMLP = LigerSwiGLUMLP
     logger.info_rank0("Apply liger kernel to seed-oss.")
+
+
+ModelClass = SeedOssForCausalLM
 
 __all__ = [
     "SeedOssForCausalLM",

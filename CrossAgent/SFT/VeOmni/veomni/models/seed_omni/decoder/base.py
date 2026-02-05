@@ -37,16 +37,10 @@ class BaseDecoderConfigMixin(PretrainedConfig, ABC):
 
 class BaseDecoderProcessorMixin(ProcessorMixin, ABC):
     valid_kwargs = ["token_size", "token_num"]
-    attributes = []
-    optional_attributes = ["chat_template", "audio_tokenizer"]
 
     def __init__(self, token_size=None, token_num=None, **kwargs):
         """ """
-        super_init_kwargs = {}
-        for key in kwargs.keys():
-            if key in self.attributes + self.optional_attributes:
-                super_init_kwargs[key] = kwargs[key]
-        super().__init__(**super_init_kwargs)
+        super().__init__(**kwargs)
         self.token_size = token_size
         self.token_num = token_num
 
@@ -78,12 +72,12 @@ class BaseDecoderModelMixin(PreTrainedModel):
         pass
 
     @abstractmethod
-    def lm_embed(self, hidden_states: torch.Tensor, **kwargs) -> torch.Tensor:
+    def lm_embed(self, hidden_states: torch.Tensor) -> torch.Tensor:
         """ """
         pass
 
     @abstractmethod
-    def lm_generate(self, hidden_states: torch.Tensor, **kwargs) -> torch.Tensor:
+    def lm_generate(self, hidden_states: torch.Tensor) -> torch.Tensor:
         """ """
         pass
 

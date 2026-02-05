@@ -43,7 +43,6 @@ from .data import (
     slice_input_tensor,
     slice_input_tensor_scale_grad,
     slice_position_embedding,
-    sp_pad_and_slice,
 )
 from .loss import reduce_sequence_parallel_loss
 from .ulysses import (
@@ -74,7 +73,6 @@ __all__ = [
     "slice_input_tensor",
     "slice_input_tensor_scale_grad",
     "slice_position_embedding",
-    "sp_pad_and_slice",
     "sequence_parallel_preprocess",
     "gather_heads_scatter_seq",
     "gather_seq_scatter_heads",

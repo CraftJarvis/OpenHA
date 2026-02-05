@@ -11,7 +11,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Callable, Dict, List, Optional, Tuple, Union
+
+from typing import List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -27,18 +28,6 @@ from ..base import BaseFoundationModelMixin
 from .configuration_qwen2_vl_foundation import Qwen2VLFoundationConfig
 
 
-def parse_position_id_kwargs(input_ids: torch.Tensor, attention_mask: torch.Tensor, grid_thw: Dict = {}, **kwargs):
-    return_dict = {
-        "input_ids": input_ids,
-        "attention_mask": attention_mask,
-    }
-    if "image" in grid_thw:
-        return_dict["image_grid_thw"] = grid_thw["image"]
-    if "video" in grid_thw:
-        return_dict["video_grid_thw"] = grid_thw["video"]
-    return return_dict
-
-
 class Qwen2VLFoundationModel(BaseFoundationModelMixin, Qwen2VLForConditionalGeneration):
     config_class = Qwen2VLFoundationConfig
 
@@ -52,8 +41,8 @@ class Qwen2VLFoundationModel(BaseFoundationModelMixin, Qwen2VLForConditionalGene
         self.rope_deltas = None  # cache rope_deltas here
 
         # Overwrite token ids
-        self.image_token_id = IMAGE_INPUT_INDEX
-        self.video_token_id = VIDEO_INPUT_INDEX
+        self.config.image_token_id = IMAGE_INPUT_INDEX
+        self.config.video_token_id = VIDEO_INPUT_INDEX
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -78,8 +67,8 @@ class Qwen2VLFoundationModel(BaseFoundationModelMixin, Qwen2VLForConditionalGene
         self.rope_deltas += rope_deltas
         return position_ids
 
-    def get_position_id_func(self) -> List[Callable]:
-        return [parse_position_id_kwargs, Qwen2VLForConditionalGeneration.get_position_id_func(self)]
+    def get_position_id_func(self):
+        return Qwen2VLForConditionalGeneration.get_position_id_func(self)
 
     def prepare_inputs_for_generation(
         self,

@@ -194,7 +194,7 @@ class Qwen2Attention(nn.Module):
 
         attention_interface: Callable = eager_attention_forward
         if self.config._attn_implementation != "eager":
-            if self.config._attn_implementation == "xf" and kwargs.get("output_attentions", False):
+            if self.config._attn_implementation == "sdpa" and kwargs.get("output_attentions", False):
                 logger.warning_once(
                     "`torch.nn.functional.scaled_dot_product_attention` does not support `output_attentions=True`. Falling back to "
                     'eager attention. This warning can be removed using the argument `attn_implementation="eager"` when loading the model.'
@@ -592,7 +592,6 @@ class Qwen2Model(Qwen2PreTrainedModel):
                     use_cache,
                     cache_position,
                     position_embeddings,
-                    **flash_attn_kwargs,
                 )
             else:
                 layer_outputs = decoder_layer(
@@ -699,7 +698,7 @@ class Qwen2Model(Qwen2PreTrainedModel):
         if (
             self.config._attn_implementation == "sdpa"
             and attention_mask is not None
-            and attention_mask.device.type in ["cuda", "xpu", "npu"]
+            and attention_mask.device.type in ["cuda", "xpu"]
             and not output_attentions
         ):
             # Attend to all tokens in fully masked rows in the causal_mask, for example the relevant first rows when
@@ -779,9 +778,6 @@ class Qwen2Model(Qwen2PreTrainedModel):
         return causal_mask
 
 
-class KwargsForCausalLM(FlashAttentionKwargs): ...
-
-
 class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
     _tied_weights_keys = ["lm_head.weight"]
     _tp_plan = {"lm_head": "colwise_rep"}
@@ -831,7 +827,7 @@ class Qwen2ForCausalLM(Qwen2PreTrainedModel, GenerationMixin):
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
         logits_to_keep: Union[int, torch.Tensor] = 0,
-        **kwargs: Unpack[KwargsForCausalLM],
+        **kwargs,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         r"""
         Args:
@@ -915,4 +911,6 @@ if is_liger_kernel_available():
     logger.info_rank0("Apply liger kernel to Qwen2.")
 
 
-__all__ = ["Qwen2ForCausalLM", "Qwen2Model"]
+ModelClass = Qwen2ForCausalLM
+
+__all__ = ["Qwen2ForCausalLM", "Qwen2Model", "Qwen2PreTrainedModel"]

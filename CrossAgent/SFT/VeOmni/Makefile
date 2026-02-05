@@ -1,6 +1,6 @@
 .PHONY: build commit quality style test
 
-check_dirs := tasks tests veomni docs
+check_dirs := tasks tests veomni docs setup.py
 
 build:
 	python3 setup.py sdist bdist_wheel
