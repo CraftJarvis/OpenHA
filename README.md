@@ -31,7 +31,7 @@ OpenHA supports multiple ways to serve and load models.
 We recommend **vLLM** for efficient multi-GPU / multi-process rollout. Example:
 
 ```sh
-CUDA_VISIBLE_DEVICES=0,1,2,3 vllm serve CraftJarvis/minecraft-openha-qwen2vl-7b-2509  \
+CUDA_VISIBLE_DEVICES=0,1,2,3 vllm serve minecraft-openha-qwen2vl-7b-2509  \
     --served-model-name minecraft-openha-qwen2vl-7b-2509  \
     --port 11000 \
     --limit-mm-per-prompt image=25  \
@@ -51,7 +51,7 @@ python examples/rollout_openha.py --output_mode text_action  \
     --system_message_tag text_action \
     --model_ips localhost --model_ports 11000 \
     --model_id minecraft-openha-qwen2vl-7b-2509 \
-    --record_path "/DATA/limuyao/evaluate" \
+    --record_path "/DATA/evaluate" \
     --max_steps_num 200 \
     --num_rollouts 8
 ```

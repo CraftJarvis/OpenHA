@@ -168,7 +168,7 @@ class InitInventoryCallback(MinecraftCallback):
         if not mc_equipments_file_path.exists():
             try:
                 from huggingface_hub import hf_hub_download
-                hf_hub_download(repo_id="CraftJarvis/MinecraftResources", repo_type="dataset",filename="mc_equipments.1.16.json", local_dir=mc_equipments_file_path.parent)
+                hf_hub_download(repo_id="MinecraftResources", repo_type="dataset",filename="mc_equipments.1.16.json", local_dir=mc_equipments_file_path.parent)
                 assert mc_equipments_file_path.exists(), f"File {mc_equipments_file_path} not found after download."
             except Exception as e:
                 raise FileNotFoundError(f"Failed to download the file: {e}")
