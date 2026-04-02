@@ -1,9 +1,4 @@
-'''
-Date: 2024-11-11 19:31:53
-LastEditors: Muyao 2350076251@qq.com
-LastEditTime: 2025-04-10 22:27:37
-FilePath: /MineStudio/minestudio/simulator/callbacks/commands.py
-'''
+
 
 from minestudio.simulator.callbacks.callback import MinecraftCallback
 

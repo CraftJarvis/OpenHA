@@ -1,9 +1,4 @@
-'''
-Date: 2024-11-11 17:26:22
-LastEditors: Muyao 2350076251@qq.com
-LastEditTime: 2025-04-10 22:24:47
-FilePath: /MineStudio/minestudio/simulator/callbacks/summon_mobs.py
-'''
+
 
 from minestudio.simulator.callbacks.callback import MinecraftCallback
 

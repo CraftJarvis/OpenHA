@@ -1,9 +1,4 @@
-'''
-Author: Muyao 2350076251@qq.com
-Date: 2025-02-18 15:57:29
-LastEditors: Muyao 2350076251@qq.com
-LastEditTime: 2025-08-29 17:33:52
-'''
+
 
 import math
 import re

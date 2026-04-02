@@ -1,9 +1,4 @@
-'''
-Date: 2025-01-05 22:26:22
-LastEditors: Muyao 2350076251@qq.com
-LastEditTime: 2025-09-10 21:57:41
-FilePath: /MineStudio/minestudio/simulator/callbacks/init_inventory.py
-'''
+
 
 from minestudio.simulator.callbacks.callback import MinecraftCallback
 from typing import Union
