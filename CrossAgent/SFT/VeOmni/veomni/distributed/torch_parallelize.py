@@ -13,6 +13,7 @@
 # limitations under the License.
 
 
+import os
 import types
 from functools import partial
 from typing import Any, Dict, List, Optional
@@ -47,6 +48,41 @@ if is_torch_version_greater_than("2.4"):
 
 
 logger = logging.get_logger(__name__)
+
+DEFAULT_FP32_UPCAST_MIN_GPU_MEMORY_GB = 36.0
+
+
+def _mixed_precision_fp32_upcast_decision(min_gpu_memory_gb: float) -> tuple[bool, str]:
+    """Decide whether to upcast the model to FP32 before FSDP wrapping."""
+    mode = os.getenv("VEOMNI_FSDP_FP32_UPCAST", "auto").strip().lower()
+    if mode in {"1", "true", "yes", "on", "force"}:
+        return True, "forced by VEOMNI_FSDP_FP32_UPCAST"
+    if mode in {"0", "false", "no", "off", "skip"}:
+        return False, "disabled by VEOMNI_FSDP_FP32_UPCAST"
+
+    if mode != "auto":
+        logger.warning_rank0(
+            f"Unknown VEOMNI_FSDP_FP32_UPCAST={mode!r}; falling back to automatic GPU-memory detection."
+        )
+
+    if not torch.cuda.is_available():
+        return True, "CUDA is not available; preserve default FP32 upcast behavior"
+
+    try:
+        device = torch.cuda.current_device()
+        props = torch.cuda.get_device_properties(device)
+        total_memory_gb = props.total_memory / (1024**3)
+        if total_memory_gb >= min_gpu_memory_gb:
+            return (
+                True,
+                f"cuda:{device} {props.name} has {total_memory_gb:.1f} GiB >= {min_gpu_memory_gb:.1f} GiB",
+            )
+        return (
+            False,
+            f"cuda:{device} {props.name} has {total_memory_gb:.1f} GiB < {min_gpu_memory_gb:.1f} GiB",
+        )
+    except Exception as exc:
+        return True, f"could not inspect CUDA device memory ({exc!r}); preserve default FP32 upcast behavior"
 
 
 def verbose_fsdp_grouping(model, prefix="", depth=0):
@@ -89,8 +125,19 @@ def build_parallelize_model(
         if kwargs.pop("enable_fsdp_offload", False):
             raise ValueError("Only FSDP training supports `enable_fsdp_offload`.")
 
-    if enable_mixed_precision:  # upcast to float32 before feed it to optimizer
-        model = model.float()
+    if enable_mixed_precision:
+        min_gpu_memory_gb = float(
+            kwargs.pop(
+                "fp32_upcast_min_gpu_memory_gb",
+                os.getenv("VEOMNI_FSDP_FP32_UPCAST_MIN_GB", DEFAULT_FP32_UPCAST_MIN_GPU_MEMORY_GB),
+            )
+        )
+        should_upcast, reason = _mixed_precision_fp32_upcast_decision(min_gpu_memory_gb)
+        if should_upcast:
+            logger.info_rank0(f"Upcast model to FP32 before FSDP mixed precision: {reason}.")
+            model = model.float()
+        else:
+            logger.info_rank0(f"Skip full FP32 upcast before FSDP mixed precision to reduce peak VRAM: {reason}.")
 
     if enable_gradient_checkpointing and hasattr(model, "gradient_checkpointing_enable"):
         logger.info_rank0("Enable gradient checkpointing.")
