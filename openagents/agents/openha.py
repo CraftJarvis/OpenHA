@@ -50,6 +50,44 @@ def maybe_brighten_dark_vlm_frame(image, info):
     x = np.power(x, gamma) * gain
     return np.clip(x * 255.0, 0, 255).astype(np.uint8)
 
+_LORA_CAPTURE_MOD = None
+_LORA_CAPTURE_MOD_LOADED = False
+
+
+def _lora_get_active_capture():
+    global _LORA_CAPTURE_MOD, _LORA_CAPTURE_MOD_LOADED
+    if not _LORA_CAPTURE_MOD_LOADED:
+        _LORA_CAPTURE_MOD_LOADED = True
+        try:
+            import importlib.util as _ilu
+        except Exception:
+            return None
+        candidates = [
+            os.environ.get("LORA_CAPTURE_MODULE_PATH"),
+            "/scratch/hekaichen/caosiyuan/LHAgent/lora/data_capture.py",
+        ]
+        for path in candidates:
+            if not path or not os.path.isfile(path):
+                continue
+            spec = _ilu.spec_from_file_location("_lora_data_capture", path)
+            if spec is None or spec.loader is None:
+                continue
+            try:
+                mod = _ilu.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                _LORA_CAPTURE_MOD = mod
+                break
+            except Exception:
+                _LORA_CAPTURE_MOD = None
+    if _LORA_CAPTURE_MOD is None:
+        return None
+    try:
+        _LORA_CAPTURE_MOD.init_from_env()
+        return _LORA_CAPTURE_MOD.get_active_capture()
+    except Exception:
+        return None
+
+
 OUTPUT_FORMAT_MODE_MAP = {
     "motion_coa": {"fusion","eager","greedy", "motion"},
     "grounding_coa":  {"fusion","eager","greedy", "grounding"},
@@ -372,6 +410,17 @@ class OpenHA(VLMClient, base_agent.MineCraftAgent):
         if not self._points:
             self._points = [[320,180]]
         self._thought = content
+        try:
+            _lora_cap = _lora_get_active_capture()
+            if _lora_cap is not None:
+                _lora_cap.record_step(
+                    frame=real_obs,
+                    instruction=instruction,
+                    system_message=self.system_message,
+                    response_text=content,
+                )
+        except Exception:
+            pass
         return content_action, content
     
     def create_history(self, actions:List[Dict] = None, observations: List[List[Union[np.ndarray,str, Path,dict ]]] = None, history: Optional[Dict[str,Any]] = None):
