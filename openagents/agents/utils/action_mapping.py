@@ -426,6 +426,13 @@ class TextActionTokenizer(ActionTokenizer):
         self.act_beg_token = "Action:" if act_beg_token is None else act_beg_token
         self.act_end_token = "" if act_end_token is None else act_end_token #"</action>"
         self.action_re = re.compile(rf"{self.act_beg_token}(.*?){self.act_end_token}(?=\n|{self.act_beg_token}|\Z)", re.DOTALL)
+        self._supports_action_repeat = (self.act_beg_token == "Action:")
+        if self._supports_action_repeat:
+            self._action_repeat_re = re.compile(
+                r"Action(?:\((\d+)\))?:(.*?)(?=\n|Action(?:\(\d+\))?:|\Z)",
+                re.DOTALL,
+            )
+            self._action_repeat_max = 20
         
         assert action_chunk_len > 0
         self.action_chunk_len = action_chunk_len 
@@ -489,10 +496,29 @@ class TextActionTokenizer(ActionTokenizer):
         return encoded_trajectory
 
     def decode(self, tokens: str, replace_keyboard:Optional[Dict[str,str]]=None):
-        """
-        replace_keyboard: is the reverse of replace_keyboard in encode() 
-            text_key -> env_key
-        """
+        if getattr(self, "_supports_action_repeat", False):
+            raw_matches = self._action_repeat_re.findall(tokens)
+            raw_matches = raw_matches[-self.action_chunk_len:]
+            env_actions = []
+            for repeat_str, body in raw_matches:
+                if repeat_str:
+                    try:
+                        repeat = int(repeat_str)
+                    except ValueError:
+                        repeat = 1
+                    if repeat < 1:
+                        repeat = 1
+                    if repeat > self._action_repeat_max:
+                        repeat = self._action_repeat_max
+                else:
+                    repeat = 1
+                env_action = self._text_to_env(body.strip(), replace_keyboard=replace_keyboard)
+                for _ in range(repeat):
+                    env_actions.append(copy.deepcopy(env_action))
+            if not env_actions:
+                env_actions = [copy.deepcopy(self._env_null_action)]
+            return env_actions
+
         matches = self.action_re.findall(tokens)
         env_actions = [self._text_to_env(t.strip(),replace_keyboard=replace_keyboard) for t in matches]
         env_actions = env_actions[-self.action_chunk_len:]

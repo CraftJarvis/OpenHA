@@ -27,6 +27,29 @@ from openagents.agents.base import SAMSession
 from openagents.agents.utils.motion_policy import load_motion_policy, MotionPolicy
 from minestudio.models import RocketPolicy, load_rocket_policy
 
+
+def maybe_brighten_dark_vlm_frame(image, info):
+    gamma_text = os.environ.get("OPENHA_DARK_GAMMA", "")
+    if not gamma_text or not isinstance(info, dict):
+        return image
+    location = info.get("location_stats") or {}
+    try:
+        light_level = float(location.get("light_level"))
+        threshold = float(os.environ.get("OPENHA_DARK_LIGHT_THRESHOLD", "7"))
+        gamma = float(gamma_text)
+        gain = float(os.environ.get("OPENHA_DARK_GAIN", "1.0"))
+    except (TypeError, ValueError):
+        return image
+    if light_level > threshold or bool(location.get("can_see_sky", False)):
+        return image
+    arr = np.asarray(image)
+    if arr.ndim != 3:
+        return image
+    arr = np.clip(arr, 0, 255).astype(np.uint8)
+    x = arr.astype(np.float32) / 255.0
+    x = np.power(x, gamma) * gain
+    return np.clip(x * 255.0, 0, 255).astype(np.uint8)
+
 OUTPUT_FORMAT_MODE_MAP = {
     "motion_coa": {"fusion","eager","greedy", "motion"},
     "grounding_coa":  {"fusion","eager","greedy", "grounding"},
@@ -311,7 +334,8 @@ class OpenHA(VLMClient, base_agent.MineCraftAgent):
             real_obs = obs
         else:
             raise ValueError("NO OBS")
-        image = self.processor_wrapper.create_image_input(real_obs) 
+        real_obs = maybe_brighten_dark_vlm_frame(real_obs, info)
+        image = self.processor_wrapper.create_image_input(real_obs)
         self._current_obs = [image]
         messages = []
         if self.maximum_history_length:
@@ -587,9 +611,15 @@ class OpenHA(VLMClient, base_agent.MineCraftAgent):
                 self._fast_iteration_tick = self.motion_inference_interval
             action = self.get_action_from_motion_policy(obs=obs, info=info,response=response)
         elif self._policy_type == "raw_action":
-            self._fast_iteration_tick = 1
+            # Action chunk consumption: when LLM responds Action(N): X, the tokenizer's
+            # decode() returns N copies of action X, stored in self._actions.
+            # The first one is consumed inside get_action_from_action_policy below.
+            # We then need to set tick = len(remaining) + 1, so that after the -=1
+            # at the bottom of router(), the next N-1 frames will skip gen_response()
+            # and pop from the buffer instead.
             action = self.get_action_from_action_policy(obs=obs,info=info, response=response)
-        
+            self._fast_iteration_tick = max(len(self._actions) + 1, 1)
+
         self._fast_iteration_tick -= 1
         return action
     
@@ -609,6 +639,16 @@ class OpenHA(VLMClient, base_agent.MineCraftAgent):
         if segment is None:  # fallback segmentation if parsing failed
             segment = self.sam_session.get_segment(obs, info, points=None)
         obs = {**obs, **segment}
+        if "image" in obs and getattr(obs["image"], "shape", None) is not None:
+            obs["image"] = cv2.resize(obs["image"], (224, 224))
+        if "segment" in obs and "obj_mask" in obs["segment"]:
+            obj_mask = obs["segment"]["obj_mask"]
+            if hasattr(obj_mask, "detach"):
+                obj_mask_np = obj_mask.detach().cpu().numpy()
+            else:
+                obj_mask_np = obj_mask
+            obs["segment"] = dict(obs["segment"])
+            obs["segment"]["obj_mask"] = cv2.resize(obj_mask_np.astype("uint8"), (224, 224), interpolation=cv2.INTER_NEAREST)
         self.segment = segment
         action, self._grounding_policy_memory = self.grounding_policy.get_action(obs, self._grounding_policy_memory, input_shape="*")
         action = self.agent_action_to_env_action(
