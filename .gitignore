@@ -210,3 +210,22 @@ __marimo__/
 *output/
 *toy*
 wandb/
+# Backup files from in-place edits (manual snapshots)
+*.bak
+*.bak_*
+*.orig
+*~
+
+# Logs / outputs / experiment artifacts
+*.log
+logs/
+swanlog/
+*.mp4
+*.avi
+
+# Editor / tmp
+.tmp/
+.vscode/
+.idea/
+.cursor/
+.opencode/
